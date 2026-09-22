@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { agentIcon, fallbackTile, modelIcon, providerIcon } from "@/lib/icons";
+import lucideIcons from "@iconify-json/lucide/icons.json";
+import simpleIcons from "@iconify-json/simple-icons/icons.json";
+import { agentIcon, fallbackTile, modelIcon, providerIcon, registerIcons } from "@/lib/icons";
 
 const VERIFIED = [
   "simple-icons:claude",
@@ -83,5 +85,33 @@ describe("verified list guard", () => {
       expect(name).not.toBeNull();
       expect(VERIFIED).toContain(name as string);
     }
+  });
+});
+
+const collections: Record<string, { icons: Record<string, unknown>; aliases?: Record<string, unknown> }> = {
+  "simple-icons": simpleIcons,
+  lucide: lucideIcons,
+};
+
+describe("offline bundling", () => {
+  test("every_verified_name_is_present_in_a_bundled_collection", () => {
+    const rendered = [
+      ...VERIFIED,
+      "lucide:cpu",
+    ];
+    for (const full of rendered) {
+      const [prefix, name] = full.split(":");
+      const collection = collections[prefix];
+      expect(collection).toBeDefined();
+      const present = name in collection.icons || (collection.aliases !== undefined && name in collection.aliases);
+      expect(present).toBe(true);
+    }
+  });
+
+  test("register_icons_is_idempotent", () => {
+    expect(() => {
+      registerIcons();
+      registerIcons();
+    }).not.toThrow();
   });
 });
