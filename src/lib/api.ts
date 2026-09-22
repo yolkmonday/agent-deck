@@ -45,6 +45,24 @@ export interface PriceEntry {
   cacheWritePerM: number;
 }
 
+export interface TimelineSpan {
+  id: string;
+  tool: string;
+  detail: string | null;
+  startMs: number;
+  endMs: number | null;
+  status: "ok" | "error" | "running";
+  tokens: TokenUsage | null;
+}
+
+export interface TimelineLane {
+  sessionId: string;
+  agent: Agent;
+  project: string;
+  model: string | null;
+  spans: TimelineSpan[];
+}
+
 export const indexStatus = () => invoke<IndexStatus>("index_status");
 export const reindex = () => invoke<IndexStatus>("reindex");
 export const historyDaily = (days: number) => invoke<DailyRow[]>("history_daily", { days });
@@ -53,3 +71,5 @@ export const historyByProject = (days: number) => invoke<ProjectRow[]>("history_
 export const historyTotals = (days: number) => invoke<Totals>("history_totals", { days });
 export const pricingGet = () => invoke<PriceEntry[]>("pricing_get");
 export const pricingSet = (entries: PriceEntry[]) => invoke<PriceEntry[]>("pricing_set", { entries });
+export const timelineSpans = (fromMs: number, toMs: number) =>
+  invoke<TimelineLane[]>("timeline_spans", { fromMs, toMs });

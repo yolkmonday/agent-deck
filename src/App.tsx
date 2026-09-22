@@ -2,8 +2,18 @@ import { useEffect, useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import type { PageKey } from "@/lib/nav";
 import { LivePage } from "@/pages/LivePage";
+import { TimelinePage } from "@/pages/TimelinePage";
 import { TokenPage } from "@/pages/TokenPage";
 import { startLive } from "@/store/live";
+
+const PAGES: Record<PageKey, () => React.ReactElement> = {
+  live: LivePage,
+  token: TokenPage,
+  timeline: TimelinePage,
+  savings: LivePage,
+  terminal: LivePage,
+  provider: LivePage,
+};
 
 const App = () => {
   const [page, setPage] = useState<PageKey>("live");
@@ -13,10 +23,11 @@ const App = () => {
       void stop.then((fn) => fn());
     };
   }, []);
+  const Page = PAGES[page];
   return (
     <div className="flex h-full">
       <Sidebar page={page} onSelect={setPage} />
-      {page === "token" ? <TokenPage /> : <LivePage />}
+      <Page />
     </div>
   );
 };
