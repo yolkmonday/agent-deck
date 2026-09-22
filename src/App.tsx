@@ -3,32 +3,44 @@ import { Sidebar } from "@/components/Sidebar";
 import type { PageKey } from "@/lib/nav";
 import { LivePage } from "@/pages/LivePage";
 import { SavingsPage } from "@/pages/SavingsPage";
+import { TerminalPage } from "@/pages/TerminalPage";
 import { TimelinePage } from "@/pages/TimelinePage";
 import { TokenPage } from "@/pages/TokenPage";
 import { startLive } from "@/store/live";
-
-const PAGES: Record<PageKey, () => React.ReactElement> = {
-  live: LivePage,
-  token: TokenPage,
-  timeline: TimelinePage,
-  savings: SavingsPage,
-  terminal: LivePage,
-  provider: LivePage,
-};
+import { startTerminalEvents } from "@/store/terminal";
 
 const App = () => {
   const [page, setPage] = useState<PageKey>("live");
+  const [terminalTarget, setTerminalTarget] = useState<string | null>(null);
+
   useEffect(() => {
     const stop = startLive();
     return () => {
       void stop.then((fn) => fn());
     };
   }, []);
-  const Page = PAGES[page];
+
+  useEffect(() => {
+    const stop = startTerminalEvents();
+    return () => {
+      void stop.then((fn) => fn());
+    };
+  }, []);
+
+  const goToTerminal = (sessionId?: string) => {
+    setTerminalTarget(sessionId ?? null);
+    setPage("terminal");
+  };
+
   return (
     <div className="flex h-full">
       <Sidebar page={page} onSelect={setPage} />
-      <Page />
+      {page === "live" && <LivePage onOpenTerminal={goToTerminal} />}
+      {page === "token" && <TokenPage />}
+      {page === "timeline" && <TimelinePage />}
+      {page === "savings" && <SavingsPage />}
+      {page === "terminal" && <TerminalPage initialSessionId={terminalTarget} />}
+      {page === "provider" && <LivePage onOpenTerminal={goToTerminal} />}
     </div>
   );
 };

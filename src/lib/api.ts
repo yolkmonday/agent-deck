@@ -92,6 +92,34 @@ export interface SavingsSummary {
   warnings: string[];
 }
 
+export interface TermProfile {
+  id: string;
+  label: string;
+  program: string;
+  args: string[];
+  available: boolean;
+}
+
+export interface TermSession {
+  id: string;
+  profileId: string;
+  label: string;
+  cwd: string;
+  command: string;
+  startedAtMs: number;
+  alive: boolean;
+}
+
+export interface TermDataEvent {
+  id: string;
+  chunk: string;
+}
+
+export interface TermExitEvent {
+  id: string;
+  code: number | null;
+}
+
 export const indexStatus = () => invoke<IndexStatus>("index_status");
 export const reindex = () => invoke<IndexStatus>("reindex");
 export const historyDaily = (days: number) => invoke<DailyRow[]>("history_daily", { days });
@@ -103,3 +131,13 @@ export const pricingSet = (entries: PriceEntry[]) => invoke<PriceEntry[]>("prici
 export const timelineSpans = (fromMs: number, toMs: number) =>
   invoke<TimelineLane[]>("timeline_spans", { fromMs, toMs });
 export const savingsSummary = (days: number) => invoke<SavingsSummary>("savings_summary", { days });
+
+export const termProfiles = () => invoke<TermProfile[]>("term_profiles");
+export const termStart = (profileId: string, cwd: string) =>
+  invoke<TermSession>("term_start", { profileId, cwd });
+export const termList = () => invoke<TermSession[]>("term_list");
+export const termWrite = (id: string, data: string) => invoke<null>("term_write", { id, data });
+export const termResize = (id: string, cols: number, rows: number) =>
+  invoke<null>("term_resize", { id, cols, rows });
+export const termKill = (id: string) => invoke<null>("term_kill", { id });
+export const termScrollback = (id: string) => invoke<string>("term_scrollback", { id });
