@@ -5,5 +5,6 @@ pub mod model;
 pub mod opencode;
 pub mod pricing;
 pub mod process;
+pub mod savings;
 pub mod store;
 pub mod transcript;
