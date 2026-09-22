@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ModelTable } from "@/components/ModelTable";
+import { PricingDialog } from "@/components/PricingDialog";
 import { RangeFilter } from "@/components/RangeFilter";
 import { TokenChart } from "@/components/TokenChart";
 import { historyByModel, historyDaily, historyTotals } from "@/lib/api";
@@ -17,6 +18,7 @@ const Kpi = ({ label, value, sub, tone = "text-fg" }: { label: string; value: st
 
 export const TokenPage = () => {
   const [days, setDays] = useState(7);
+  const [pricing, setPricing] = useState(false);
   const totals = useQuery({ queryKey: ["history", "totals", days], queryFn: () => historyTotals(days) });
   const daily = useQuery({ queryKey: ["history", "daily", days], queryFn: () => historyDaily(days) });
   const models = useQuery({ queryKey: ["history", "models", days], queryFn: () => historyByModel(days) });
@@ -36,8 +38,18 @@ export const TokenPage = () => {
           <h1 className="text-[22px] font-semibold">Token &amp; Biaya</h1>
           <span className="text-[12.5px] text-fg-2">Pemakaian token dan estimasi biaya semua agent</span>
         </div>
-        <RangeFilter value={days} onChange={setDays} />
+        <div className="flex items-center gap-2.5">
+          <RangeFilter value={days} onChange={setDays} />
+          <button
+            type="button"
+            onClick={() => setPricing(true)}
+            className="cursor-pointer rounded-lg border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
+          >
+            Harga model
+          </button>
+        </div>
       </header>
+      {pricing && <PricingDialog onClose={() => setPricing(false)} />}
       <main className="flex min-w-0 flex-1 flex-col gap-6.5 overflow-y-auto px-7 pb-7">
         <div className="flex">
           <Kpi label="Total token" value={formatTokens(t ? t.tokens.input + t.tokens.output + t.tokens.cacheRead + t.tokens.cacheWrite : 0)} sub={`${t?.messages ?? 0} pesan`} />
