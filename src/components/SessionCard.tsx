@@ -77,7 +77,7 @@ export const SessionCard = ({
   return (
     <div
       ref={rootRef}
-      className={`flex flex-col gap-3 rounded-[10px] border p-4 ${
+      className={`flex h-full min-w-0 flex-col gap-3 rounded-[10px] border p-4 ${
         waiting ? "border-waiting/40 bg-waiting/6" : "border-border bg-surface"
       } ${highlighted ? "ring-2 ring-waiting/70" : ""}`}
     >
@@ -91,43 +91,61 @@ export const SessionCard = ({
           {statusLabel[s.status]}
         </span>
       </div>
-      <div className="flex flex-col gap-0.75">
-        <span className="text-base font-semibold">{s.project}</span>
-        <span className="truncate font-mono text-[11.5px] text-fg-3">{s.cwd}</span>
-        <span className="text-xs text-fg-2">{[s.model, s.branch].filter(Boolean).join(" · ") || "-"}</span>
+      <div className="flex min-w-0 flex-col gap-0.75">
+        <span className="truncate text-base font-semibold" title={s.project}>
+          {s.project}
+        </span>
+        <span className="truncate font-mono text-[11.5px] text-fg-3" title={s.cwd}>
+          {s.cwd}
+        </span>
+        <span className="truncate text-xs text-fg-2">
+          {[s.model, s.branch].filter(Boolean).join(" · ") || "-"}
+        </span>
       </div>
-      <div className={`flex flex-col gap-1 rounded-md px-3 py-2.5 ${waiting ? "bg-waiting/10" : "bg-bg"}`}>
-        <span className={`text-[11.5px] font-semibold ${waiting ? "text-waiting" : "text-fg-3"}`}>{act.label}</span>
-        {act.detail && <span className="break-words font-mono text-xs leading-[1.4]">{act.detail}</span>}
+      <div className={`flex min-w-0 flex-col gap-1 rounded-md px-3 py-2.5 ${waiting ? "bg-waiting/10" : "bg-bg"}`}>
+        <span className={`truncate text-[11.5px] font-semibold ${waiting ? "text-waiting" : "text-fg-3"}`}>
+          {act.label}
+        </span>
+        {act.detail && (
+          <span className="line-clamp-2 break-all font-mono text-xs leading-[1.4]" title={act.detail}>
+            {act.detail}
+          </span>
+        )}
       </div>
-      <div className="flex items-center gap-3 font-mono text-[11.5px]">
-        <span className="text-fg-2">{formatTokens(totalTokens(s.tokens))}</span>
-        {s.priced ? (
-          <span className="text-fg-2">{formatUsd(s.costUsd)}</span>
-        ) : (
-          <span className="text-fg-3" title="Model ini belum ada di tabel harga.">-</span>
-        )}
-        <span className="text-fg-3">{since}</span>
-        {waiting ? (
-          <button
-            type="button"
-            onClick={answerWaiting}
-            className="ml-auto cursor-pointer rounded-md bg-waiting px-3 py-1.25 text-[12px] font-semibold text-bg"
-          >
-            Jawab
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={startNew}
-            className={`ml-auto rounded-md border border-border px-3 py-1.25 text-[12px] font-semibold ${
-              busy ? "cursor-default text-fg-3" : "cursor-pointer text-fg-2"
-            }`}
-          >
-            Terminal
-          </button>
-        )}
+      <div className="mt-auto flex flex-col gap-2">
+        <div className="flex items-center gap-3 font-mono text-[11.5px] whitespace-nowrap">
+          <span className="text-fg-2">{formatTokens(totalTokens(s.tokens))}</span>
+          {s.priced ? (
+            <span className="text-fg-2">{formatUsd(s.costUsd)}</span>
+          ) : (
+            <span className="text-fg-3" title="Model ini belum ada di tabel harga.">
+              -
+            </span>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-mono text-[11.5px] whitespace-nowrap text-fg-3">{since}</span>
+          {waiting ? (
+            <button
+              type="button"
+              onClick={answerWaiting}
+              className="shrink-0 cursor-pointer rounded-md bg-waiting px-3 py-1.25 text-[12px] font-semibold text-bg"
+            >
+              Jawab
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={startNew}
+              className={`shrink-0 rounded-md border border-border px-3 py-1.25 text-[12px] font-semibold ${
+                busy ? "cursor-default text-fg-3" : "cursor-pointer text-fg-2"
+              }`}
+            >
+              Terminal
+            </button>
+          )}
+        </div>
       </div>
       {note && <span className="text-[11.5px] text-fg-3">{note}</span>}
     </div>

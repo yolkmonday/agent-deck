@@ -27,7 +27,7 @@ export const LivePage = ({
           </span>
         </div>
       </header>
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <main className="flex min-w-0 flex-1 flex-col gap-6.5 overflow-y-auto px-7 pb-7">
           <KpiRow sessions={sessions} />
           {snapshot?.warnings.map((w) => (
@@ -44,7 +44,7 @@ export const LivePage = ({
               Belum ada agent yang berjalan. Buka claude atau opencode di terminal.
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] items-stretch gap-4">
               {sessions.map((s) => (
                 <SessionCard
                   key={s.id}

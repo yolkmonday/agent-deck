@@ -7,7 +7,7 @@ const clock = (ms: number) =>
   new Date(ms).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false }).replace(".", ":");
 
 export const ActivityFeed = ({ events }: { events: FeedEvent[] }) => (
-  <aside className="flex w-82.5 shrink-0 flex-col gap-3.5 border-l border-border px-5.5 pt-5.5 pb-5.5">
+  <aside className="flex w-[330px] shrink-0 flex-col gap-3.5 border-l border-border px-5.5 pt-5.5 pb-5.5 max-[1200px]:w-[250px]">
     <div className="flex items-center justify-between">
       <span className="text-sm font-semibold">Aktivitas terbaru</span>
       <span className="font-mono text-[11px] text-ok">real-time</span>

@@ -19,10 +19,17 @@ export const KpiRow = ({ sessions }: { sessions: Session[] }) => {
   return (
     <div className="flex">
       {items.map((k, i) => (
-        <div key={k.label} className={`flex flex-1 flex-col gap-1.5 ${i === 0 ? "pr-6" : "border-l border-border px-6"}`}>
-          <span className="text-xs text-fg-3">{k.label}</span>
-          <span className={`font-mono text-[30px] font-semibold ${k.tone}`}>{k.value}</span>
-          <span className="text-xs text-fg-2">{k.sub}</span>
+        <div
+          key={k.label}
+          className={`flex min-w-0 flex-1 flex-col gap-1.5 ${i === 0 ? "pr-6" : "border-l border-border px-6"}`}
+        >
+          <span className="truncate text-xs text-fg-3">{k.label}</span>
+          <span className={`font-mono text-[clamp(20px,2.2vw,30px)] font-semibold whitespace-nowrap ${k.tone}`}>
+            {k.value}
+          </span>
+          <span className="truncate text-xs text-fg-2" title={k.sub}>
+            {k.sub}
+          </span>
         </div>
       ))}
     </div>
