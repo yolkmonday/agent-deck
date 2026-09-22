@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
+use terminal::{TermDataEvent, TermExitEvent, TermProfile, TermSession, TerminalRegistry};
 
 struct AppState {
     collector: Mutex<LiveCollector>,
@@ -21,6 +22,7 @@ struct AppState {
     indexing: AtomicBool,
     last_run_ms: Mutex<Option<i64>>,
     savings_cache: Mutex<Option<SavingsCache>>,
+    terminals: Mutex<TerminalRegistry>,
 }
 
 fn now_ms() -> i64 {
@@ -521,6 +523,82 @@ fn pricing_set(
     Ok(table.entries().to_vec())
 }
 
+#[tauri::command]
+fn term_profiles() -> Vec<TermProfile> {
+    TerminalRegistry::profiles()
+}
+
+#[tauri::command]
+fn term_start(
+    profile_id: String,
+    cwd: String,
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<TermSession, String> {
+    let mut reg = state.terminals.lock().map_err(|e| e.to_string())?;
+    let data_app = app.clone();
+    reg.start(
+        &profile_id,
+        &cwd,
+        move |evt: TermDataEvent| {
+            let _ = data_app.emit("term://data", evt);
+        },
+        move |evt: TermExitEvent| {
+            let _ = app.emit("term://exit", evt);
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn term_list(state: State<'_, Arc<AppState>>) -> Result<Vec<TermSession>, String> {
+    Ok(state.terminals.lock().map_err(|e| e.to_string())?.list())
+}
+
+#[tauri::command]
+fn term_write(id: String, data: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state
+        .terminals
+        .lock()
+        .map_err(|e| e.to_string())?
+        .write(&id, &data)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn term_resize(
+    id: String,
+    cols: u16,
+    rows: u16,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state
+        .terminals
+        .lock()
+        .map_err(|e| e.to_string())?
+        .resize(&id, cols, rows)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn term_kill(id: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state
+        .terminals
+        .lock()
+        .map_err(|e| e.to_string())?
+        .kill(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn term_scrollback(id: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    Ok(state
+        .terminals
+        .lock()
+        .map_err(|e| e.to_string())?
+        .scrollback(&id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -752,6 +830,7 @@ pub fn run() {
                 indexing: AtomicBool::new(false),
                 last_run_ms: Mutex::new(None),
                 savings_cache: Mutex::new(None),
+                terminals: Mutex::new(TerminalRegistry::new()),
             });
             app.manage(state.clone());
 
@@ -793,8 +872,25 @@ pub fn run() {
             timeline_spans,
             savings_summary,
             pricing_get,
-            pricing_set
+            pricing_set,
+            term_profiles,
+            term_start,
+            term_list,
+            term_write,
+            term_resize,
+            term_kill,
+            term_scrollback
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // No agent process we spawned may outlive the window.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(state) = app.try_state::<Arc<AppState>>() {
+                    if let Ok(mut reg) = state.terminals.lock() {
+                        reg.kill_all();
+                    }
+                }
+            }
+        });
 }
