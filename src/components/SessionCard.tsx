@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDuration, formatTokens, totalTokens } from "@/lib/format";
 import type { Session } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
@@ -26,10 +26,14 @@ export const SessionCard = ({
   session: s,
   nowMs,
   onOpenTerminal,
+  highlighted = false,
+  onHighlightDone,
 }: {
   session: Session;
   nowMs: number;
   onOpenTerminal: (sessionId?: string) => void;
+  highlighted?: boolean;
+  onHighlightDone?: () => void;
 }) => {
   const waiting = s.status === "waiting";
   const act = activityText(s);
@@ -38,6 +42,14 @@ export const SessionCard = ({
   const startSession = useTerminal((st) => st.start);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!highlighted) return;
+    rootRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const timer = setTimeout(() => onHighlightDone?.(), 1600);
+    return () => clearTimeout(timer);
+  }, [highlighted, onHighlightDone]);
 
   const owned = terminalSessions.find((t) => t.cwd === s.cwd);
   const openOwned = () => onOpenTerminal(owned?.id);
@@ -61,7 +73,12 @@ export const SessionCard = ({
       .finally(() => setBusy(false));
   };
   return (
-    <div className={`flex flex-col gap-3 rounded-[10px] border p-4 ${waiting ? "border-waiting/40 bg-waiting/6" : "border-border bg-surface"}`}>
+    <div
+      ref={rootRef}
+      className={`flex flex-col gap-3 rounded-[10px] border p-4 ${
+        waiting ? "border-waiting/40 bg-waiting/6" : "border-border bg-surface"
+      } ${highlighted ? "ring-2 ring-waiting/70" : ""}`}
+    >
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-fg-2">
           <span className={`size-2 rounded-full ${agentColor[s.agent]}`} />
