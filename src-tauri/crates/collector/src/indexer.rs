@@ -385,9 +385,102 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
     report
 }
 
+/// Walks the opencode SQLite DB read-only and indexes assistant messages.
+pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
+    let mut report = IndexReport::default();
+    if !db.exists() {
+        return report;
+    }
+    let key = db.to_string_lossy().to_string();
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        report.errors.push(format!("open failed: {key}"));
+        return report;
+    };
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(500));
+
+    let progress = store.file_progress(&key);
+    let since = progress.as_ref().map(|p| p.offset).unwrap_or(0);
+    let (mtime_ms, size) = file_meta(db).unwrap_or((0, 0));
+
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT m.id, m.time_created, m.data, s.directory \
+         FROM message m JOIN session s ON s.id = m.session_id \
+         WHERE m.time_created > ?1 ORDER BY m.time_created ASC",
+    ) else {
+        report.errors.push(format!("query failed: {key}"));
+        return report;
+    };
+    let rows = stmt.query_map([since], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    });
+    let Ok(rows) = rows else {
+        report.errors.push(format!("query failed: {key}"));
+        return report;
+    };
+
+    report.files_scanned = 1;
+    let mut out = Vec::new();
+    let mut max_ts = since;
+    for (id, ts, data, directory) in rows.flatten() {
+        max_ts = max_ts.max(ts);
+        let Ok(v) = serde_json::from_str::<Value>(&data) else { continue };
+        if v.get("role").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let model = match (
+            v.get("providerID").and_then(Value::as_str),
+            v.get("modelID").and_then(Value::as_str),
+        ) {
+            (Some(p), Some(m)) => format!("{p}/{m}"),
+            (None, Some(m)) => m.to_string(),
+            _ => continue,
+        };
+        let tokens = v.get("tokens").cloned().unwrap_or(Value::Null);
+        let get = |k: &str| tokens.get(k).and_then(Value::as_u64).unwrap_or(0);
+        let cache = tokens.get("cache").cloned().unwrap_or(Value::Null);
+        let cache_get = |k: &str| cache.get(k).and_then(Value::as_u64).unwrap_or(0);
+        out.push(MessageRow {
+            id: format!("opencode:{id}"),
+            agent: Agent::Opencode,
+            session_id: id.clone(),
+            project: crate::live::project_name(&directory, home),
+            model,
+            ts_ms: ts,
+            tokens: TokenUsage {
+                input: get("input"),
+                output: get("output"),
+                reasoning: get("reasoning"),
+                cache_read: cache_get("read"),
+                cache_write: cache_get("write"),
+            },
+        });
+    }
+
+    match store.upsert_messages(&out) {
+        Ok(n) => report.messages_upserted += n,
+        Err(e) => report.errors.push(format!("upsert failed: {e}")),
+    }
+    if let Err(e) = store.set_file_progress(&FileProgress {
+        path: key,
+        mtime_ms,
+        size,
+        offset: max_ts,
+    }) {
+        report.errors.push(format!("progress failed: {e}"));
+    }
+    report
+}
+
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod tests {    use super::*;
     use crate::store::Store;
 
     fn append(path: &Path, s: &str) {
@@ -607,5 +700,86 @@ mod tests {
 
         let projects = s.by_project(0).unwrap();
         assert_eq!(projects[0].project, "kirimi");
+    }
+
+    fn opencode_db(dir: &Path) -> std::path::PathBuf {
+        let path = dir.join("opencode.db");
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER);
+             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);",
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO session VALUES ('ses_1','/Users/yolk/Dev/kirimi',1)",
+            [],
+        )
+        .unwrap();
+        path
+    }
+
+    fn insert_message(db: &Path, id: &str, ts: i64, role: &str, input: u64, output: u64) {
+        let c = rusqlite::Connection::open(db).unwrap();
+        let data = format!(
+            r#"{{"role":"{role}","providerID":"kn","modelID":"deepseek-v4-1-flash","tokens":{{"input":{input},"output":{output},"reasoning":3,"cache":{{"read":40,"write":5}}}}}}"#
+        );
+        c.execute(
+            "INSERT INTO message VALUES (?1,'ses_1',?2,?3)",
+            rusqlite::params![id, ts, data],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn opencode_indexes_assistant_messages_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_message(&db, "msg_u", 100, "user", 1, 1);
+        insert_message(&db, "msg_a", 200, "assistant", 10, 20);
+
+        let mut s = store_at(tmp.path());
+        let r = index_opencode(&mut s, &db, home());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(r.messages_upserted, 1);
+        assert_eq!(s.counts().unwrap().1, 1);
+
+        let models = s.by_model(0).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].model, "kn/deepseek-v4-1-flash");
+        assert_eq!(models[0].agent, Agent::Opencode);
+        assert_eq!(models[0].tokens.input, 10);
+        assert_eq!(models[0].tokens.output, 20);
+        assert_eq!(models[0].tokens.reasoning, 3);
+        assert_eq!(models[0].tokens.cache_read, 40);
+        assert_eq!(models[0].tokens.cache_write, 5);
+        let projects = s.by_project(0).unwrap();
+        assert_eq!(projects[0].project, "kirimi");
+    }
+
+    #[test]
+    fn opencode_second_run_only_reads_newer_messages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_message(&db, "msg_a", 200, "assistant", 10, 20);
+
+        let mut s = store_at(tmp.path());
+        let first = index_opencode(&mut s, &db, home());
+        assert_eq!(first.messages_upserted, 1);
+
+        insert_message(&db, "msg_b", 300, "assistant", 1, 2);
+        let second = index_opencode(&mut s, &db, home());
+        assert_eq!(second.messages_upserted, 1);
+        assert_eq!(s.counts().unwrap().1, 2);
+    }
+
+    #[test]
+    fn opencode_missing_db_reports_no_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = store_at(tmp.path());
+        let r = index_opencode(&mut s, &tmp.path().join("nope.db"), home());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(r.messages_upserted, 0);
+        assert_eq!(r.files_scanned, 0);
+        assert_eq!(s.counts().unwrap(), (0, 0));
     }
 }
