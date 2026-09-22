@@ -1257,6 +1257,7 @@ mod tests {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let home = std::env::var("HOME").unwrap_or_default();
             let dir = data_dir(&app.handle().clone());
@@ -1339,7 +1340,8 @@ pub fn run() {
             project_touch,
             project_suggestions,
             settings_get,
-            settings_set
+            settings_set,
+            window_focused
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
