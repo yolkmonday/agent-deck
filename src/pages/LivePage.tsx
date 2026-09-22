@@ -3,7 +3,7 @@ import { KpiRow } from "@/components/KpiRow";
 import { SessionCard } from "@/components/SessionCard";
 import { useLive } from "@/store/live";
 
-export const LivePage = () => {
+export const LivePage = ({ onOpenTerminal }: { onOpenTerminal: (sessionId?: string) => void }) => {
   const snapshot = useLive((s) => s.snapshot);
   const events = useLive((s) => s.events);
   const sessions = snapshot?.sessions ?? [];
@@ -38,7 +38,7 @@ export const LivePage = () => {
           ) : (
             <div className="grid grid-cols-3 gap-4">
               {sessions.map((s) => (
-                <SessionCard key={s.id} session={s} nowMs={nowMs} />
+                <SessionCard key={s.id} session={s} nowMs={nowMs} onOpenTerminal={onOpenTerminal} />
               ))}
             </div>
           )}

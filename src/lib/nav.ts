@@ -15,6 +15,6 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "token", label: "Token & Biaya", icon: BarChart3, enabled: true },
   { key: "timeline", label: "Timeline", icon: History, enabled: true },
   { key: "savings", label: "Hemat Token", icon: PiggyBank, enabled: true },
-  { key: "terminal", label: "Terminal", icon: SquareTerminal, enabled: false },
+  { key: "terminal", label: "Terminal", icon: SquareTerminal, enabled: true },
   { key: "provider", label: "Model & Provider", icon: Cpu, enabled: false },
 ];
