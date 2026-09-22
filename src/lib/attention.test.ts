@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { TermSession } from "@/lib/api";
-import { newlyWaiting, resolveTarget, waitingLabel, waitingSessions } from "@/lib/attention";
+import {
+  healthLabel,
+  newlyWaiting,
+  resolveTarget,
+  unhealthySessions,
+  waitingLabel,
+  waitingSessions,
+} from "@/lib/attention";
 import type { Session } from "@/lib/types";
 
 const session = (over: Partial<Session> = {}): Session => ({
@@ -18,6 +25,10 @@ const session = (over: Partial<Session> = {}): Session => ({
   priced: true,
   startedAtMs: 0,
   updatedAtMs: 0,
+  quietMs: 0,
+  toolRunningMs: null,
+  health: "ok",
+  healthReason: null,
   ...over,
 });
 
@@ -89,5 +100,43 @@ describe("waitingLabel", () => {
   test("formats project and duration", () => {
     const s = session({ project: "noor", updatedAtMs: 0 });
     expect(waitingLabel(s, 8 * 60_000)).toBe("noor butuh jawaban · 8 mnt");
+  });
+});
+
+describe("unhealthySessions", () => {
+  test("puts stalled before slow", () => {
+    const slow = session({ id: "slow", health: "slow", healthReason: "tool \"Bash\" berjalan 12 mnt" });
+    const stalled = session({ id: "stalled", health: "stalled", healthReason: "diam 9 mnt tanpa tool berjalan" });
+    expect(unhealthySessions([slow, stalled]).map((s) => s.id)).toEqual(["stalled", "slow"]);
+  });
+
+  test("sorts by quiet time within a group", () => {
+    const recent = session({ id: "recent", health: "stalled", quietMs: 6 * 60_000 });
+    const older = session({ id: "older", health: "stalled", quietMs: 30 * 60_000 });
+    expect(unhealthySessions([recent, older]).map((s) => s.id)).toEqual(["older", "recent"]);
+  });
+
+  test("excludes ok sessions", () => {
+    const ok = session({ id: "ok", health: "ok" });
+    const stalled = session({ id: "stalled", health: "stalled" });
+    expect(unhealthySessions([ok, stalled]).map((s) => s.id)).toEqual(["stalled"]);
+  });
+});
+
+describe("healthLabel", () => {
+  test("formats stalled and slow", () => {
+    const stalled = session({
+      project: "noor",
+      health: "stalled",
+      healthReason: "diam 9 mnt tanpa tool berjalan",
+    });
+    expect(healthLabel(stalled)).toBe("noor macet · diam 9 mnt tanpa tool berjalan");
+
+    const slow = session({
+      project: "kirimi",
+      health: "slow",
+      healthReason: 'tool "Bash" berjalan 12 mnt',
+    });
+    expect(healthLabel(slow)).toBe('kirimi lambat · tool "Bash" berjalan 12 mnt');
   });
 });

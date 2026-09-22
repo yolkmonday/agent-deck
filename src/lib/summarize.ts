@@ -11,5 +11,6 @@ export const summarize = (sessions: Session[]) => {
     tokens: sessions.reduce((sum, s) => sum + totalTokens(s.tokens), 0),
     cost: sessions.reduce((sum, s) => sum + s.costUsd, 0),
     unpriced: sessions.filter((s) => !s.priced).length,
+    stalled: sessions.filter((s) => s.health === "stalled").length,
   };
 };

@@ -34,3 +34,16 @@ export const notifyWaiting = async (session: Session): Promise<boolean> => {
     return false;
   }
 };
+
+export const notifyStalled = async (session: Session): Promise<boolean> => {
+  if (!(await ensurePermission())) return false;
+  try {
+    sendNotification({
+      title: `${session.project} macet`,
+      body: session.healthReason ?? `${session.model ?? session.agent} · tidak ada kemajuan`,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};

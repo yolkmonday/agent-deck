@@ -6,6 +6,7 @@ const s = (status: Session["status"], out: number, costUsd = 0, priced = true): 
   id: status + out, agent: "claude", pid: 1, project: "p", cwd: "/p", model: null, branch: null,
   status, activity: null, tokens: { input: 0, output: out, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
   costUsd, priced, startedAtMs: null, updatedAtMs: 0,
+  quietMs: 0, toolRunningMs: null, health: "ok", healthReason: null,
 });
 
 test("summarize counts by status, sums tokens and adds cost of unpriced sessions", () => {
@@ -23,5 +24,6 @@ test("summarize counts by status, sums tokens and adds cost of unpriced sessions
     tokens: 20,
     cost: 2,
     unpriced: 1,
+    stalled: 0,
   });
 });

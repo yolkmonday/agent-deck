@@ -6,16 +6,18 @@ import type { Session } from "@/lib/types";
 export const KpiRow = ({ sessions }: { sessions: Session[] }) => {
   const s = summarize(sessions);
   const items = [
-    { label: "Agent aktif", value: String(s.active), sub: `${s.busy} sibuk · ${s.waiting} nunggu · ${s.idle} diam`, tone: "text-fg" },
-    { label: "Butuh input", value: String(s.waiting), sub: s.waiting ? "menunggu jawaban kamu" : "tidak ada", tone: s.waiting ? "text-waiting" : "text-fg" },
-    { label: "Token sesi aktif", value: formatTokens(s.tokens), sub: "gabungan semua sesi berjalan", tone: "text-fg" },
+    { label: "Agent aktif", value: String(s.active), sub: `${s.busy} sibuk · ${s.waiting} nunggu · ${s.idle} diam`, tone: "text-fg", alert: "" },
+    { label: "Butuh input", value: String(s.waiting), sub: s.waiting ? "menunggu jawaban kamu" : "tidak ada", tone: s.waiting ? "text-waiting" : "text-fg", alert: "" },
+    { label: "Token sesi aktif", value: formatTokens(s.tokens), sub: "gabungan semua sesi berjalan", tone: "text-fg", alert: "" },
     {
       label: "Estimasi biaya",
       value: formatUsd(s.cost),
       sub: s.unpriced === 0 ? "semua model punya harga" : `${s.unpriced} model belum punya harga`,
       tone: s.unpriced === 0 ? "text-fg" : "text-waiting",
+      alert: "",
     },
   ];
+  if (s.stalled > 0) items[0].alert = `· ${s.stalled} macet`;
   return (
     <div className="flex">
       {items.map((k, i) => (
@@ -29,6 +31,7 @@ export const KpiRow = ({ sessions }: { sessions: Session[] }) => {
           </span>
           <span className="truncate text-xs text-fg-2" title={k.sub}>
             {k.sub}
+            {k.alert && <span className="text-err"> {k.alert}</span>}
           </span>
         </div>
       ))}
