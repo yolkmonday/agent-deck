@@ -21,7 +21,48 @@
   --color-codex: #a78bfa;
   --font-sans: "Inter Variable", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --duration-fast: 120ms;
+  --duration-base: 160ms;
+  --duration-slow: 220ms;
 }
 
 html, body, #root { height: 100%; }
 body { background: var(--color-bg); color: var(--color-fg); font-family: var(--font-sans); }
+
+/* Every interactive surface answers the pointer in the same way. */
+.ad-interactive {
+  transition-property: color, background-color, border-color, opacity, box-shadow;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-out-quart);
+}
+
+/* Presses read as pressed. Transform only, so it never triggers layout.
+   The full property list keeps this composable with .ad-interactive instead of
+   clobbering its colour transition with the transition shorthand. */
+.ad-press {
+  transition-property: transform, color, background-color, border-color, opacity, box-shadow;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-out-quart);
+}
+.ad-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@keyframes ad-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ad-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.ad-rise  { animation: ad-rise var(--duration-slow) var(--ease-out-quart) both; }
+.ad-fade  { animation: ad-fade var(--duration-base) var(--ease-out-quart) both; }
+
+/* One global opt-out rather than a check in every component. */
+@media (prefers-reduced-motion: reduce) {
+  .ad-interactive, .ad-press { transition: none; }
+  .ad-press:active:not(:disabled) { transform: none; }
+  .ad-rise, .ad-fade { animation: none; }
+}
