@@ -3,7 +3,7 @@ use collector::live::{LiveCollector, Paths};
 use collector::model::{Agent, LiveSnapshot, TokenUsage};
 use collector::pricing::{PriceEntry, PriceTable};
 use collector::process::SystemProcessTable;
-use collector::store::{ModelAgg, ProjectAgg, Store, TotalsAgg};
+use collector::store::{ModelAgg, ProjectAgg, SpanRow, Store, TotalsAgg};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -78,6 +78,89 @@ struct Totals {
     cost_usd: f64,
     messages: i64,
     cache_hit_pct: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TimelineSpan {
+    id: String,
+    tool: String,
+    detail: Option<String>,
+    start_ms: i64,
+    end_ms: Option<i64>,
+    status: String,
+    tokens: Option<TokenUsage>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TimelineLane {
+    session_id: String,
+    agent: Agent,
+    project: String,
+    model: Option<String>,
+    spans: Vec<TimelineSpan>,
+}
+
+const KNOWN_SPAN_STATUSES: [&str; 3] = ["ok", "error", "running"];
+
+fn timeline_span(s: SpanRow) -> TimelineSpan {
+    // The store keeps whatever string it was handed; the frontend contract only
+    // colours ok/error/running, so anything unexpected degrades to running.
+    let status = if KNOWN_SPAN_STATUSES.contains(&s.status.as_str()) {
+        s.status
+    } else {
+        "running".to_string()
+    };
+    TimelineSpan {
+        id: s.id,
+        tool: s.tool,
+        detail: s.detail,
+        start_ms: s.start_ms,
+        end_ms: s.end_ms,
+        status,
+        tokens: s.tokens,
+    }
+}
+
+/// Spans overlapping the window, grouped into one lane per session and ordered by
+/// each lane's earliest span. Sessions with no span inside the window are absent.
+#[tauri::command]
+fn timeline_spans(
+    from_ms: i64,
+    to_ms: i64,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<TimelineLane>, String> {
+    let rows = state
+        .store
+        .lock()
+        .unwrap()
+        .spans(from_ms, to_ms)
+        .map_err(|e| e.to_string())?;
+
+    // `Store::spans` already orders by session_id then start_ms.
+    let mut lanes: Vec<TimelineLane> = Vec::new();
+    for row in rows {
+        let span = timeline_span(row.clone());
+        match lanes.last_mut().filter(|l| l.session_id == row.session_id) {
+            Some(lane) => {
+                if row.model.is_some() {
+                    lane.model = row.model;
+                }
+                lane.spans.push(span);
+            }
+            None => lanes.push(TimelineLane {
+                session_id: row.session_id.clone(),
+                agent: row.agent,
+                project: row.project.clone(),
+                model: row.model.clone(),
+                spans: vec![span],
+            }),
+        }
+    }
+
+    lanes.sort_by_key(|l| l.spans.first().map(|s| s.start_ms).unwrap_or(0));
+    Ok(lanes)
 }
 
 fn since_ms(days: i64) -> i64 {
@@ -265,6 +348,71 @@ fn pricing_set(
     Ok(table.entries().to_vec())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span_row(id: &str, session_id: &str, model: Option<&str>, start_ms: i64) -> SpanRow {
+        SpanRow {
+            id: id.into(),
+            agent: Agent::Claude,
+            session_id: session_id.into(),
+            project: "kirimi".into(),
+            model: model.map(str::to_string),
+            tool: "Bash".into(),
+            detail: None,
+            start_ms,
+            end_ms: None,
+            status: "running".into(),
+            tokens: None,
+        }
+    }
+
+    #[test]
+    fn timeline_wire_shape_matches_the_frontend_contract() {
+        let lane = TimelineLane {
+            session_id: "s1".into(),
+            agent: Agent::Claude,
+            project: "kirimi".into(),
+            model: Some("claude-sonnet-5".into()),
+            spans: vec![timeline_span(SpanRow {
+                end_ms: None,
+                status: "error".into(),
+                detail: Some("bun test".into()),
+                tokens: Some(TokenUsage { input: 1, output: 2, cache_read: 3, cache_write: 4, reasoning: 5 }),
+                ..span_row("claude:t1", "s1", Some("claude-sonnet-5"), 1000)
+            })],
+        };
+        let v = serde_json::to_value(&lane).unwrap();
+        assert_eq!(v["sessionId"], "s1");
+        assert_eq!(v["agent"], "claude");
+        assert_eq!(v["spans"][0]["startMs"], 1000);
+        assert_eq!(v["spans"][0]["endMs"], serde_json::Value::Null);
+        assert_eq!(v["spans"][0]["status"], "error");
+        assert_eq!(v["spans"][0]["tokens"]["cacheRead"], 3);
+    }
+
+    #[test]
+    fn unknown_span_status_degrades_to_running() {
+        let s = timeline_span(SpanRow {
+            status: "weird".into(),
+            ..span_row("x", "s1", None, 0)
+        });
+        assert_eq!(s.status, "running");
+    }
+
+    #[test]
+    fn timeline_span_keeps_known_statuses() {
+        for st in KNOWN_SPAN_STATUSES {
+            let s = timeline_span(SpanRow {
+                status: st.to_string(),
+                ..span_row("x", "s1", None, 0)
+            });
+            assert_eq!(s.status, st);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -320,6 +468,7 @@ pub fn run() {
             history_by_model,
             history_by_project,
             history_totals,
+            timeline_spans,
             pricing_get,
             pricing_set
         ])

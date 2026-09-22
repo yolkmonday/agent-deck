@@ -24,6 +24,20 @@ CREATE TABLE IF NOT EXISTS indexed_file (
   size INTEGER NOT NULL,
   offset INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS tool_span (
+  id TEXT PRIMARY KEY,
+  agent TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  project TEXT NOT NULL,
+  model TEXT,
+  tool TEXT NOT NULL,
+  detail TEXT,
+  start_ms INTEGER NOT NULL,
+  end_ms INTEGER,
+  status TEXT NOT NULL,
+  input INTEGER, output INTEGER, cache_read INTEGER, cache_write INTEGER, reasoning INTEGER
+);
+CREATE INDEX IF NOT EXISTS tool_span_start ON tool_span(start_ms);
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +49,21 @@ pub struct MessageRow {
     pub model: String,
     pub ts_ms: i64,
     pub tokens: TokenUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpanRow {
+    pub id: String,
+    pub agent: Agent,
+    pub session_id: String,
+    pub project: String,
+    pub model: Option<String>,
+    pub tool: String,
+    pub detail: Option<String>,
+    pub start_ms: i64,
+    pub end_ms: Option<i64>,
+    pub status: String,
+    pub tokens: Option<TokenUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +173,94 @@ impl Store {
         }
         tx.commit()?;
         Ok(rows.len())
+    }
+
+    pub fn upsert_spans(&mut self, rows: &[SpanRow]) -> Result<usize> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR REPLACE INTO tool_span \
+                 (id, agent, session_id, project, model, tool, detail, start_ms, end_ms, status, \
+                  input, output, cache_read, cache_write, reasoning) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            )?;
+            for r in rows {
+                let t = r.tokens.as_ref();
+                stmt.execute(rusqlite::params![
+                    r.id,
+                    agent_str(r.agent),
+                    r.session_id,
+                    r.project,
+                    r.model,
+                    r.tool,
+                    r.detail,
+                    r.start_ms,
+                    r.end_ms,
+                    r.status,
+                    t.map(|u| u.input as i64),
+                    t.map(|u| u.output as i64),
+                    t.map(|u| u.cache_read as i64),
+                    t.map(|u| u.cache_write as i64),
+                    t.map(|u| u.reasoning as i64),
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(rows.len())
+    }
+
+    fn span_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SpanRow> {
+        // All five token columns are written together, so any non-null one means
+        // the span carries usage; a span without usage stores five NULLs.
+        let tokens = if r.get::<_, Option<i64>>(10)?.is_some() {
+            Some(usage_from_row(r, 10)?)
+        } else {
+            None
+        };
+        Ok(SpanRow {
+            id: r.get(0)?,
+            agent: agent_from_str(&r.get::<_, String>(1)?),
+            session_id: r.get(2)?,
+            project: r.get(3)?,
+            model: r.get(4)?,
+            tool: r.get(5)?,
+            detail: r.get(6)?,
+            start_ms: r.get(7)?,
+            end_ms: r.get(8)?,
+            status: r.get(9)?,
+            tokens,
+        })
+    }
+
+    const SPAN_COLS: &'static str = "id, agent, session_id, project, model, tool, detail, \
+                                     start_ms, end_ms, status, \
+                                     input, output, cache_read, cache_write, reasoning";
+
+    /// Every span that OVERLAPS `[from_ms, to_ms)`. A span with no `end_ms` is
+    /// still running and therefore overlaps everything from its start onwards.
+    pub fn spans(&self, from_ms: i64, to_ms: i64) -> Result<Vec<SpanRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {} FROM tool_span \
+             WHERE start_ms < ?1 AND (end_ms IS NULL OR end_ms > ?2) \
+             ORDER BY session_id ASC, start_ms ASC",
+            Self::SPAN_COLS
+        ))?;
+        let rows = stmt.query_map([to_ms, from_ms], Self::span_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn span_by_id(&self, id: &str) -> Result<Option<SpanRow>> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("SELECT {} FROM tool_span WHERE id = ?1", Self::SPAN_COLS))?;
+        let mut rows = stmt.query_map([id], Self::span_from_row)?;
+        match rows.next() {
+            Some(r) => Ok(Some(r?)),
+            None => Ok(None),
+        }
     }
 
     pub fn file_progress(&self, path: &str) -> Option<FileProgress> {
@@ -438,6 +555,78 @@ mod tests {
         let all = s.totals(0).unwrap();
         assert_eq!(all.messages, 2);
         assert_eq!(all.tokens.input, 8);
+    }
+
+    fn span(id: &str, start_ms: i64, end_ms: Option<i64>) -> SpanRow {
+        SpanRow {
+            id: id.into(),
+            agent: Agent::Claude,
+            session_id: "s1".into(),
+            project: "kirimi".into(),
+            model: Some("claude-sonnet-5".into()),
+            tool: "Bash".into(),
+            detail: Some("bun test".into()),
+            start_ms,
+            end_ms,
+            status: "ok".into(),
+            tokens: None,
+        }
+    }
+
+    #[test]
+    fn spans_upsert_is_idempotent_by_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let r = span("claude:t1", 1_000, Some(2_000));
+        assert_eq!(s.upsert_spans(&[r.clone()]).unwrap(), 1);
+        s.upsert_spans(&[r]).unwrap();
+        assert_eq!(s.spans(0, 10_000).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn spans_returns_overlapping_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        s.upsert_spans(&[
+            span("before", 100, Some(200)),
+            span("after", 9_000, Some(9_500)),
+            span("straddles-start", 900, Some(1_100)),
+            span("inside", 1_500, Some(1_600)),
+        ])
+        .unwrap();
+        let ids: Vec<String> = s.spans(1_000, 5_000).unwrap().into_iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec!["straddles-start".to_string(), "inside".to_string()]);
+    }
+
+    #[test]
+    fn spans_with_null_end_are_treated_as_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        s.upsert_spans(&[span("open", 500, None)]).unwrap();
+        let rows = s.spans(1_000, 5_000).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "open");
+        assert_eq!(rows[0].end_ms, None);
+    }
+
+    #[test]
+    fn spans_round_trip_tokens_and_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let mut failed = span("err", 1_000, Some(2_000));
+        failed.status = "error".into();
+        failed.tokens = Some(usage(1, 2, 3, 4));
+        failed.model = None;
+        failed.detail = None;
+        s.upsert_spans(&[failed.clone(), span("bare", 3_000, Some(3_100))]).unwrap();
+
+        let rows = s.spans(0, 10_000).unwrap();
+        let err = rows.iter().find(|r| r.id == "err").unwrap();
+        assert_eq!(err, &failed);
+        assert_eq!(err.status, "error");
+        assert_eq!(err.tokens, Some(usage(1, 2, 3, 4)));
+        let bare = rows.iter().find(|r| r.id == "bare").unwrap();
+        assert_eq!(bare.tokens, None);
     }
 
     #[test]
