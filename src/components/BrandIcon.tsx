@@ -38,14 +38,20 @@ export const BrandIcon = ({
   );
 };
 
-export const AgentIcon = ({ agent, size = 16 }: { agent: Agent; size?: number }) => (
-  <BrandIcon name={agentIcon(agent)} fallbackKey={agent} size={size} />
+export const AgentIcon = ({ agent, size = 16, className }: { agent: Agent; size?: number; className?: string }) => (
+  <BrandIcon name={agentIcon(agent)} fallbackKey={agent} size={size} className={className} />
 );
 
-export const ModelIcon = ({ model, size = 16 }: { model: string | null; size?: number }) => (
-  <BrandIcon name={modelIcon(model)} fallbackKey={model ?? "?"} size={size} />
+export const ModelIcon = ({ model, size = 16, className }: { model: string | null; size?: number; className?: string }) => (
+  <BrandIcon name={modelIcon(model)} fallbackKey={model ?? "?"} size={size} className={className} />
 );
 
-export const ProviderIcon = ({ providerId, size = 16 }: { providerId: string; size?: number }) => (
-  <BrandIcon name={providerIcon(providerId)} fallbackKey={providerId} size={size} />
-);
+export const ProviderIcon = ({
+  providerId,
+  size = 16,
+  className,
+}: {
+  providerId: string;
+  size?: number;
+  className?: string;
+}) => <BrandIcon name={providerIcon(providerId)} fallbackKey={providerId} size={size} className={className} />;

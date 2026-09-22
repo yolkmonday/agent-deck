@@ -1,6 +1,8 @@
+import { AgentIcon } from "@/components/BrandIcon";
 import type { FeedEvent } from "@/lib/types";
 
 const dot = { waiting: "bg-waiting", busy: "bg-busy", ok: "bg-ok", idle: "bg-idle" } as const;
+const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 const clock = (ms: number) =>
   new Date(ms).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false }).replace(".", ":");
 
@@ -17,7 +19,10 @@ export const ActivityFeed = ({ events }: { events: FeedEvent[] }) => (
           <span className="font-mono text-[11.5px] text-fg-3">{clock(e.timeMs)}</span>
           <span className={`mt-1.25 size-1.75 shrink-0 rounded-full ${dot[e.color]}`} />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="text-[12.5px] font-semibold">{e.project}</span>
+            <span className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+              <AgentIcon agent={e.agent} size={13} className={agentText[e.agent]} />
+              {e.project}
+            </span>
             <span className="break-words text-xs leading-[1.4] text-fg-2">{e.text}</span>
           </div>
         </div>

@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { AgentIcon } from "@/components/BrandIcon";
 import { formatDuration, formatTokens, totalTokens } from "@/lib/format";
 import type { Session } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
 
-const agentColor = { claude: "bg-claude", opencode: "bg-opencode", codex: "bg-codex" } as const;
+const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 const agentName = { claude: "Claude", opencode: "opencode", codex: "Codex" } as const;
 const statusLabel = { busy: "Sibuk", waiting: "Menunggu", idle: "Diam" } as const;
 const statusPill = {
@@ -64,7 +65,7 @@ export const SessionCard = ({
     <div className={`flex flex-col gap-3 rounded-[10px] border p-4 ${waiting ? "border-waiting/40 bg-waiting/6" : "border-border bg-surface"}`}>
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-fg-2">
-          <span className={`size-2 rounded-full ${agentColor[s.agent]}`} />
+          <AgentIcon agent={s.agent} size={14} className={agentText[s.agent]} />
           {agentName[s.agent]}
         </span>
         <span className={`flex items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${statusPill[s.status]}`}>

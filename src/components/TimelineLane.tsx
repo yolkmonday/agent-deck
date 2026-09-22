@@ -1,7 +1,8 @@
+import { AgentIcon, ModelIcon } from "@/components/BrandIcon";
 import type { TimelineLane as Lane, TimelineSpan } from "@/lib/api";
 import { layoutSpan } from "@/lib/timeline";
 
-const agentColor = { claude: "bg-claude", opencode: "bg-opencode", codex: "bg-codex" } as const;
+const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 const agentName = { claude: "Claude", opencode: "opencode", codex: "Codex" } as const;
 
 const spanClass: Record<TimelineSpan["status"], string> = {
@@ -29,11 +30,14 @@ export const TimelineLane = ({
     <div className="w-[180px] shrink-0 pr-4">
       <div className="flex flex-col gap-0.75 py-2.5">
         <span className="flex items-center gap-1.5 truncate text-[12.5px] font-semibold">
-          <span className={`size-2 shrink-0 rounded-full ${agentColor[lane.agent]}`} />
+          <AgentIcon agent={lane.agent} size={14} className={agentText[lane.agent]} />
           <span className="truncate">{lane.project}</span>
         </span>
         <span className="truncate font-mono text-[11px] text-fg-3">
-          {lane.model ?? agentName[lane.agent]}
+          <span className="flex items-center gap-1.5">
+            <ModelIcon model={lane.model} size={13} />
+            <span className="truncate">{lane.model ?? agentName[lane.agent]}</span>
+          </span>
         </span>
       </div>
     </div>

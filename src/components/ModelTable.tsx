@@ -1,3 +1,4 @@
+import { AgentIcon, ModelIcon } from "@/components/BrandIcon";
 import type { ModelRow } from "@/lib/api";
 import { formatUsd } from "@/lib/cost";
 import { formatTokens } from "@/lib/format";
@@ -6,6 +7,12 @@ const dot: Record<string, string> = {
   claude: "bg-claude",
   opencode: "bg-opencode",
   codex: "bg-codex",
+};
+
+const text: Record<string, string> = {
+  claude: "text-claude",
+  opencode: "text-opencode",
+  codex: "text-codex",
 };
 
 const label: Record<string, string> = { claude: "Claude", opencode: "opencode", codex: "Codex" };
@@ -36,7 +43,10 @@ export const ModelTable = ({ rows }: { rows: ModelRow[] }) => {
             <tr key={`${r.agent}:${r.model}`} className="border-b border-border/60 last:border-0">
               <td className="py-3">
                 <div className="flex flex-col gap-1.5">
-                  <span className="font-mono text-[12.5px] text-fg">{r.model}</span>
+                  <span className="flex items-center gap-1.5 font-mono text-[12.5px] text-fg">
+                    <ModelIcon model={r.model} size={14} />
+                    {r.model}
+                  </span>
                   {max > 0 && (
                     <span className="h-0.75 w-24 overflow-hidden rounded-full bg-surface-2">
                       <span
@@ -49,7 +59,7 @@ export const ModelTable = ({ rows }: { rows: ModelRow[] }) => {
               </td>
               <td className="py-3">
                 <span className="flex items-center gap-2 text-[12.5px] text-fg-2">
-                  <span className={`size-1.75 rounded-full ${dot[r.agent] ?? "bg-idle"}`} />
+                  <AgentIcon agent={r.agent as "claude" | "opencode" | "codex"} size={14} className={text[r.agent] ?? "text-fg-3"} />
                   {label[r.agent] ?? r.agent}
                 </span>
               </td>
