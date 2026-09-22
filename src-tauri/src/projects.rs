@@ -385,12 +385,16 @@ mod tests {
                     status: collector::model::Status::Idle,
                     activity: None,
                     tokens: Default::default(),
+                    cost_usd: 0.0,
+                    priced: false,
                     started_at_ms: None,
                     updated_at_ms: 0,
                 })
                 .collect(),
             warnings: Vec::new(),
             generated_at_ms: 0,
+            cost_usd: 0.0,
+            unpriced: 0,
         }
     }
 

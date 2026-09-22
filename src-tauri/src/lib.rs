@@ -363,7 +363,8 @@ fn status(state: &AppState) -> Result<IndexStatus, String> {
 
 #[tauri::command]
 fn live_snapshot(state: State<'_, Arc<AppState>>) -> LiveSnapshot {
-    state.collector.lock().unwrap().snapshot(now_ms())
+    let prices = state.pricing.lock().unwrap().clone();
+    state.collector.lock().unwrap().snapshot(now_ms(), &prices)
 }
 
 #[tauri::command]
@@ -972,7 +973,8 @@ fn project_suggestions(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<projects::ProjectSuggestion>, String> {
     let home = home_dir();
-    let live = state.collector.lock().unwrap().snapshot(now_ms());
+    let prices = state.pricing.lock().unwrap().clone();
+    let live = state.collector.lock().unwrap().snapshot(now_ms(), &prices);
     let (known, saved_paths) = {
         let store = state.store.lock().map_err(|e| e.to_string())?;
         let known = store.known_project_dirs().map_err(|e| e.to_string())?;
@@ -1294,7 +1296,10 @@ pub fn run() {
             std::thread::spawn(move || {
                 let mut last: Option<LiveSnapshot> = None;
                 loop {
-                    let snap = state.collector.lock().unwrap().snapshot(now_ms());
+                    // The price lock is held only for the clone, never across the
+                    // emit or the sleep below.
+                    let prices = state.pricing.lock().unwrap().clone();
+                    let snap = state.collector.lock().unwrap().snapshot(now_ms(), &prices);
                     if last.as_ref().is_none_or(|l| !l.same_content(&snap)) {
                         let _ = handle.emit("live://snapshot", &snap);
                         last = Some(snap);

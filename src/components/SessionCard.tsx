@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AgentIcon } from "@/components/BrandIcon";
+import { formatUsd } from "@/lib/cost";
 import { formatDuration, formatTokens, totalTokens } from "@/lib/format";
 import type { Session } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
@@ -101,6 +102,11 @@ export const SessionCard = ({
       </div>
       <div className="flex items-center gap-3 font-mono text-[11.5px]">
         <span className="text-fg-2">{formatTokens(totalTokens(s.tokens))}</span>
+        {s.priced ? (
+          <span className="text-fg-2">{formatUsd(s.costUsd)}</span>
+        ) : (
+          <span className="text-fg-3" title="Model ini belum ada di tabel harga.">-</span>
+        )}
         <span className="text-fg-3">{since}</span>
         {waiting ? (
           <button

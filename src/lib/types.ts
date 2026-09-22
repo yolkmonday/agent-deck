@@ -27,6 +27,8 @@ export interface Session {
   status: Status;
   activity: Activity | null;
   tokens: TokenUsage;
+  costUsd: number;
+  priced: boolean;
   startedAtMs: number | null;
   updatedAtMs: number;
 }
@@ -35,6 +37,8 @@ export interface LiveSnapshot {
   sessions: Session[];
   warnings: string[];
   generatedAtMs: number;
+  costUsd: number;
+  unpriced: number;
 }
 
 export interface FeedEvent {

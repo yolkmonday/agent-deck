@@ -9,5 +9,7 @@ export const summarize = (sessions: Session[]) => {
     waiting: count("waiting"),
     idle: count("idle"),
     tokens: sessions.reduce((sum, s) => sum + totalTokens(s.tokens), 0),
+    cost: sessions.reduce((sum, s) => sum + s.costUsd, 0),
+    unpriced: sessions.filter((s) => !s.priced).length,
   };
 };
