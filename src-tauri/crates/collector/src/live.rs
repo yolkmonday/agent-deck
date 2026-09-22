@@ -4,10 +4,11 @@ use crate::model::{Activity, ActivityKind, Agent, LiveSnapshot, Orphan, Session,
 use crate::opencode::{read_active, running_dirs, OpencodeLive};
 use crate::process::ProcessTable;
 use crate::pricing::PriceTable;
+use crate::repo::{self, RepoInfo};
 use crate::subagent::{self, SubAgent, SubAgentMeta};
 use crate::transcript::{find_transcript, TranscriptState};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub struct Paths {
@@ -51,6 +52,11 @@ pub struct LiveCollector {
     /// `meta.json` is tiny but parsed on every pass otherwise; the mtime decides
     /// whether a re-read is needed at all.
     meta_cache: HashMap<PathBuf, (i64, SubAgentMeta)>,
+    /// A directory's repository never changes while it lives, so the one file
+    /// read `.git` costs is paid once per cwd rather than once per tick.
+    repo_cache: HashMap<String, RepoInfo>,
+    /// Swapped out in tests to count resolutions.
+    resolve_repo: Arc<dyn Fn(&Path) -> RepoInfo + Send + Sync>,
 }
 
 fn claude_activity(c: &ClaudeLive, st: &TranscriptState) -> Option<Activity> {
@@ -78,6 +84,13 @@ fn claude_activity(c: &ClaudeLive, st: &TranscriptState) -> Option<Activity> {
     })
 }
 
+/// Everything the board needs to fold a session into its main project.
+fn grouping(info: RepoInfo, home: &str) -> (String, String, bool, Option<String>) {
+    let group_root = info.root.to_string_lossy().to_string();
+    let group = repo::display_name(&info.root, home);
+    (group, group_root, info.is_worktree, info.worktree_name)
+}
+
 fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds: &Thresholds, now_ms: i64) -> Session {
     let activity = match (&o.running_tool, o.status) {
         (Some(t), _) => Some(Activity { kind: ActivityKind::Tool, label: t.clone(), detail: None }),
@@ -98,12 +111,18 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds
     let tool = o.running_tool.as_deref().zip(tool_running_ms);
     let (health, health_reason) = health::evaluate(o.status, quiet_ms, tool, thresholds);
     let own_tokens = o.tokens.clone();
+    let cwd = o.directory;
+    let (group, group_root, is_worktree, worktree_name) = grouping(repo::resolve(Path::new(&cwd)), home);
     Session {
         id: o.id,
         agent: Agent::Opencode,
         pid: Some(o.pid),
-        project: project_name(&o.directory, home),
-        cwd: o.directory,
+        project: project_name(&cwd, home),
+        cwd,
+        group,
+        group_root,
+        is_worktree,
+        worktree_name,
         model: o.model,
         branch: None,
         status: o.status,
@@ -124,7 +143,35 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds
 
 impl LiveCollector {
     pub fn new(paths: Paths, procs: Arc<dyn ProcessTable>) -> Self {
-        Self { paths, procs, transcripts: HashMap::new(), subagents: HashMap::new(), meta_cache: HashMap::new() }
+        Self {
+            paths,
+            procs,
+            transcripts: HashMap::new(),
+            subagents: HashMap::new(),
+            meta_cache: HashMap::new(),
+            repo_cache: HashMap::new(),
+            resolve_repo: Arc::new(repo::resolve),
+        }
+    }
+
+    /// Lets a test count resolutions without a real filesystem shape.
+    pub fn with_resolver(
+        paths: Paths,
+        procs: Arc<dyn ProcessTable>,
+        resolve_repo: Arc<dyn Fn(&Path) -> RepoInfo + Send + Sync>,
+    ) -> Self {
+        Self { resolve_repo, ..Self::new(paths, procs) }
+    }
+
+    /// Reads `.git` once per directory and remembers the answer; a cwd that has
+    /// been seen before costs a hash lookup, not a stat.
+    fn repo_info(&mut self, cwd: &str) -> RepoInfo {
+        if let Some(cached) = self.repo_cache.get(cwd) {
+            return cached.clone();
+        }
+        let info = (self.resolve_repo)(Path::new(cwd));
+        self.repo_cache.insert(cwd.to_string(), info.clone());
+        info
     }
 
     fn claude_session(&mut self, c: ClaudeLive, prices: &PriceTable, thresholds: &Thresholds, now_ms: i64) -> Session {
@@ -171,12 +218,18 @@ impl LiveCollector {
         let tool_running_ms = pending_tool_id.as_ref().and(tool_started_ms).map(|t| (now_ms - t).max(0));
         let tool = last_tool.as_ref().map(|t| t.name.as_str()).zip(tool_running_ms);
         let (health, health_reason) = health::evaluate(c.status, quiet_ms, tool, thresholds);
+        let home = self.paths.home.clone();
+        let (group, group_root, is_worktree, worktree_name) = grouping(self.repo_info(&c.cwd), &home);
         Session {
             id: c.session_id.clone(),
             agent: Agent::Claude,
             pid: Some(c.pid),
-            project: project_name(&c.cwd, &self.paths.home),
+            project: project_name(&c.cwd, &home),
             cwd: c.cwd.clone(),
+            group,
+            group_root,
+            is_worktree,
+            worktree_name,
             model,
             branch,
             status: c.status,
@@ -903,5 +956,85 @@ mod tests {
         let snap = c.snapshot(1_000_000, &PriceTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions.len(), 1);
         assert!(snap.orphans.is_empty());
+    }
+
+    /// Lays out `<parent>/<main>` with a `.git` directory and `<parent>/<name>` as
+    /// a linked worktree pointing at it — the shape git actually writes.
+    fn worktree_repo(parent: &std::path::Path, main: &str, name: &str) -> (String, String) {
+        let main_repo = parent.join(main);
+        fs::create_dir_all(main_repo.join(".git/worktrees").join(name)).unwrap();
+        let wt = parent.join(name);
+        fs::create_dir_all(&wt).unwrap();
+        fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}\n", main_repo.join(".git/worktrees").join(name).display()),
+        )
+        .unwrap();
+        (main_repo.to_str().unwrap().to_string(), wt.to_str().unwrap().to_string())
+    }
+
+    #[test]
+    fn a_worktree_session_is_grouped_under_the_main_repo() {
+        let (tmp, paths) = setup();
+        let (main, wt) = worktree_repo(tmp.path(), "noor", "noor-oc-feat-1");
+        claude_session(&paths, 1, "s1", &main, "busy", 10);
+        claude_session(&paths, 2, "s2", &wt, "busy", 20);
+        let mut c = collector(paths, &[1, 2]);
+
+        let snap = c.snapshot(30, &PriceTable::defaults(), &Thresholds::defaults());
+        let a = snap.sessions.iter().find(|s| s.id == "s1").unwrap();
+        let b = snap.sessions.iter().find(|s| s.id == "s2").unwrap();
+        assert_eq!(a.group_root, main);
+        assert_eq!(b.group_root, main);
+        assert_eq!(a.group, "noor");
+        assert_eq!(b.group, "noor", "a worktree shows the main project's name");
+        assert!(!a.is_worktree);
+        assert_eq!(a.worktree_name, None);
+        assert!(b.is_worktree);
+        assert_eq!(b.worktree_name.as_deref(), Some("noor-oc-feat-1"));
+        assert_eq!(b.project, "noor-oc-feat-1", "the card still names its own folder");
+    }
+
+    #[test]
+    fn a_plain_session_groups_under_itself() {
+        let (tmp, paths) = setup();
+        let dir = tmp.path().join("kirimi");
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        let at = dir.to_str().unwrap();
+        claude_session(&paths, 1, "s1", at, "busy", 10);
+        let mut c = collector(paths, &[1]);
+
+        let s = &c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0];
+        assert_eq!(s.group, "kirimi");
+        assert_eq!(s.group_root, at);
+        assert!(!s.is_worktree);
+        assert_eq!(s.worktree_name, None);
+    }
+
+    #[test]
+    fn repo_resolution_is_cached() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/x/a", "busy", 10);
+        claude_session(&paths, 2, "s2", "/x/b", "busy", 20);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = calls.clone();
+        let mut c = LiveCollector::with_resolver(
+            paths,
+            Arc::new({
+                let mut procs = FakeProcessTable::default();
+                procs.alive.extend([1, 2]);
+                procs
+            }),
+            Arc::new(move |p: &Path| {
+                seen.fetch_add(1, Ordering::SeqCst);
+                RepoInfo { root: p.to_path_buf(), is_worktree: false, worktree_name: None }
+            }),
+        );
+
+        c.snapshot(30, &PriceTable::defaults(), &Thresholds::defaults());
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "once per distinct cwd");
+        c.snapshot(40, &PriceTable::defaults(), &Thresholds::defaults());
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "not re-read on the next tick");
     }
 }

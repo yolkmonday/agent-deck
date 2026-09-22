@@ -156,8 +156,19 @@ export const SessionCard = ({
         <span className="truncate font-mono text-[11.5px] text-fg-3" title={s.cwd}>
           {s.cwd}
         </span>
-        <span className="truncate text-xs text-fg-2">
-          {[s.model, s.branch].filter(Boolean).join(" · ") || "-"}
+        <span className="flex min-w-0 items-center gap-1 text-xs text-fg-2">
+          <span className="truncate">
+            {[s.model, s.branch].filter(Boolean).join(" · ") || "-"}
+          </span>
+          {s.branch && <Icon icon="lucide:git-branch" width={12} height={12} className="shrink-0 text-fg-3" />}
+          {s.isWorktree && s.worktreeName && (
+            <span className="flex min-w-0 items-center gap-1 rounded-full bg-bg px-1.5 py-0.5">
+              <Icon icon="lucide:folder-git-2" width={12} height={12} className="shrink-0 text-fg-3" />
+              <span className="truncate font-mono text-[11.5px] text-fg-3" title={s.worktreeName}>
+                {s.worktreeName}
+              </span>
+            </span>
+          )}
         </span>
       </div>
       <div className={`flex min-w-0 flex-col gap-1 rounded-md px-3 py-2.5 ${waiting ? "bg-waiting/10" : "bg-bg"}`}>

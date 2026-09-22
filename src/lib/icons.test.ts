@@ -98,6 +98,8 @@ describe("offline bundling", () => {
     const rendered = [
       ...VERIFIED,
       "lucide:cpu",
+      "lucide:git-branch",
+      "lucide:folder-git-2",
     ];
     for (const full of rendered) {
       const [prefix, name] = full.split(":");
