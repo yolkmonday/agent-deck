@@ -96,9 +96,9 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
   const allValid = rows !== null && rows.every(valid);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 px-6" onClick={onClose}>
+    <div className="ad-fade fixed inset-0 z-50 flex items-center justify-center bg-bg/70 px-6" onClick={onClose}>
       <div
-        className="flex max-h-[85vh] w-full max-w-3xl flex-col gap-4 overflow-hidden rounded-xl border border-border bg-surface p-6"
+        className="ad-rise flex max-h-[85vh] w-full max-w-3xl flex-col gap-4 overflow-hidden rounded-xl border border-border bg-surface p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">

@@ -100,14 +100,14 @@ export const GroupModal = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+      className="ad-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
       role="dialog"
       aria-modal="true"
       aria-label={`Sesi lain di ${label}`}
       onClick={onClose}
     >
       <div
-        className="flex max-h-[80vh] w-full max-w-[760px] flex-col rounded-xl border border-border bg-surface"
+        className="ad-rise flex max-h-[80vh] w-full max-w-[760px] flex-col rounded-xl border border-border bg-surface"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-3.5">

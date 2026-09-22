@@ -53,8 +53,11 @@ export const ActivityPage = () => {
             Belum ada kejadian. Aktivitas agent akan muncul di sini selama app terbuka.
           </div>
         ) : (
-          rows.map((e) => (
-            <div key={e.id} className="flex min-w-0 items-start gap-3 border-b border-border pb-3">
+          rows.map((e, i) => (
+            <div
+              key={e.id}
+              className={`flex min-w-0 items-start gap-3 border-b border-border pb-3 ${i === 0 ? "ad-rise" : ""}`}
+            >
               <span className="w-[68px] shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-3">
                 {clock(e.timeMs)}
               </span>

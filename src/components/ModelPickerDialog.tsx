@@ -28,9 +28,9 @@ export const ModelPickerDialog = ({ fetched, existing, onCancel, onAdd }: ModelP
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 px-6" onClick={onCancel}>
+    <div className="ad-fade fixed inset-0 z-50 flex items-center justify-center bg-bg/70 px-6" onClick={onCancel}>
       <div
-        className="flex max-h-[80vh] w-full max-w-xl flex-col gap-4 rounded-xl border border-border bg-surface p-5"
+        className="ad-rise flex max-h-[80vh] w-full max-w-xl flex-col gap-4 rounded-xl border border-border bg-surface p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">

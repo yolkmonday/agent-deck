@@ -135,7 +135,7 @@ export const SessionCard = ({
   return (
     <div
       ref={rootRef}
-      className={`flex h-full min-w-0 flex-col gap-3 rounded-[10px] border p-4 ${
+      className={`ad-rise flex h-full min-w-0 flex-col gap-3 rounded-[10px] border p-4 ${
         stalled
           ? "border-err/40 bg-err/6"
           : waiting || slow

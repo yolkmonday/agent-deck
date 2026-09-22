@@ -49,7 +49,7 @@ export const SettingsPopover = ({
   return (
     <div
       ref={ref}
-      className="absolute top-full right-0 z-50 mt-2 flex w-72 flex-col gap-2 rounded-[10px] border border-border bg-surface p-3.5 shadow-lg"
+      className="ad-rise absolute top-full right-0 z-50 mt-2 flex w-72 flex-col gap-2 rounded-[10px] border border-border bg-surface p-3.5 shadow-lg"
     >
       <span className="text-[12px] font-semibold">Saat ada agent bertanya</span>
       {OPTIONS.map(({ value, label }) => (
