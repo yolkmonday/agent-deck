@@ -64,7 +64,7 @@ src/
 - [ ] **Step 1: Scaffold in a temp dir, then copy in (the repo already has `docs/` and `.gitignore`)**
 
 ```bash
-cd /tmp && rm -rf agent-deck-scaffold && bunx create-tauri-app@latest agent-deck-scaffold -m bun -t react-ts --identifier dev.yolk.agentdeck -y
+cd /tmp && rm -rf agent-deck-scaffold && bunx create-tauri-app@latest agent-deck-scaffold -m bun -t react-ts --identifier dev.agentdeck.app -y
 cd <worktree> && rsync -a --exclude .git --exclude .gitignore --exclude README.md /tmp/agent-deck-scaffold/ ./
 cat /tmp/agent-deck-scaffold/.gitignore >> .gitignore && sort -u .gitignore -o .gitignore
 ```
