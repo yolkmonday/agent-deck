@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::health::Health;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Agent {
@@ -83,6 +85,19 @@ pub struct Session {
     pub priced: bool,
     pub started_at_ms: Option<i64>,
     pub updated_at_ms: i64,
+    pub quiet_ms: i64,
+    pub tool_running_ms: Option<i64>,
+    pub health: Health,
+    pub health_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Orphan {
+    pub agent: Agent,
+    pub pid: u32,
+    pub cwd: String,
+    pub age_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +108,7 @@ pub struct LiveSnapshot {
     pub generated_at_ms: i64,
     pub cost_usd: f64,
     pub unpriced: usize,
+    pub orphans: Vec<Orphan>,
 }
 
 impl LiveSnapshot {
@@ -101,6 +117,7 @@ impl LiveSnapshot {
             && self.warnings == other.warnings
             && self.cost_usd == other.cost_usd
             && self.unpriced == other.unpriced
+            && self.orphans == other.orphans
     }
 }
 
@@ -134,6 +151,7 @@ mod tests {
             model: None, branch: None, status: Status::Waiting, activity: None,
             tokens: TokenUsage::default(), cost_usd: 0.0, priced: false,
             started_at_ms: None, updated_at_ms: 5,
+            quiet_ms: 0, tool_running_ms: None, health: Health::Ok, health_reason: None,
         };
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["agent"], "claude");
@@ -142,14 +160,26 @@ mod tests {
         assert_eq!(v["tokens"]["cacheRead"], 0);
         assert_eq!(v["costUsd"], 0.0);
         assert_eq!(v["priced"], false);
+        assert_eq!(v["quietMs"], 0);
+        assert_eq!(v["toolRunningMs"], serde_json::Value::Null);
+        assert_eq!(v["health"], "ok");
+        assert_eq!(v["healthReason"], serde_json::Value::Null);
     }
 
     #[test]
     fn same_content_ignores_timestamp() {
-        let a = LiveSnapshot { sessions: vec![], warnings: vec![], generated_at_ms: 1, cost_usd: 0.0, unpriced: 0 };
-        let b = LiveSnapshot { sessions: vec![], warnings: vec![], generated_at_ms: 2, cost_usd: 0.0, unpriced: 0 };
+        let a = LiveSnapshot { sessions: vec![], warnings: vec![], generated_at_ms: 1, cost_usd: 0.0, unpriced: 0, orphans: vec![] };
+        let b = LiveSnapshot { sessions: vec![], warnings: vec![], generated_at_ms: 2, cost_usd: 0.0, unpriced: 0, orphans: vec![] };
         assert!(a.same_content(&b));
-        let c = LiveSnapshot { sessions: vec![], warnings: vec!["x".into()], generated_at_ms: 2, cost_usd: 0.0, unpriced: 0 };
+        let c = LiveSnapshot { sessions: vec![], warnings: vec!["x".into()], generated_at_ms: 2, cost_usd: 0.0, unpriced: 0, orphans: vec![] };
         assert!(!a.same_content(&c));
+    }
+
+    #[test]
+    fn same_content_notices_new_orphans() {
+        let a = LiveSnapshot { sessions: vec![], warnings: vec![], generated_at_ms: 1, cost_usd: 0.0, unpriced: 0, orphans: vec![] };
+        let mut b = a.clone();
+        b.orphans.push(Orphan { agent: Agent::Opencode, pid: 9, cwd: "/x".into(), age_ms: 1000 });
+        assert!(!a.same_content(&b));
     }
 }

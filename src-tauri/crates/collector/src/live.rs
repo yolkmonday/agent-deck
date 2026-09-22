@@ -1,4 +1,5 @@
 use crate::claude::{read_claude_sessions, ClaudeLive};
+use crate::health::Health;
 use crate::model::{Activity, ActivityKind, Agent, LiveSnapshot, Session, Status};
 use crate::opencode::{read_active, OpencodeLive};
 use crate::process::ProcessTable;
@@ -100,6 +101,10 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable) -> Session
         priced,
         started_at_ms: None,
         updated_at_ms: o.updated_at_ms,
+        quiet_ms: 0,
+        tool_running_ms: None,
+        health: Health::Ok,
+        health_reason: None,
     }
 }
 
@@ -142,6 +147,10 @@ impl LiveCollector {
             priced,
             started_at_ms: c.started_at_ms,
             updated_at_ms: c.updated_at_ms,
+            quiet_ms: 0,
+            tool_running_ms: None,
+            health: Health::Ok,
+            health_reason: None,
         }
     }
 
@@ -170,7 +179,7 @@ impl LiveCollector {
         });
         let cost_usd = sessions.iter().map(|s| s.cost_usd).sum();
         let unpriced = sessions.iter().filter(|s| !s.priced).count();
-        LiveSnapshot { sessions, warnings, generated_at_ms: now_ms, cost_usd, unpriced }
+        LiveSnapshot { sessions, warnings, generated_at_ms: now_ms, cost_usd, unpriced, orphans: vec![] }
     }
 }
 
