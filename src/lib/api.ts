@@ -154,6 +154,17 @@ export interface TermExitEvent {
   code: number | null;
 }
 
+export type RecoverAction = "nudge" | "kill" | "restart";
+
+/** A refusal comes back as `ok: false` with a readable message, not as a thrown
+ *  error, so "pid sudah bukan proses agent" reads as information. */
+export interface RecoverResult {
+  ok: boolean;
+  action: RecoverAction;
+  message: string;
+  newTermId: string | null;
+}
+
 export interface OcModel {
   id: string;
   name: string | null;
@@ -304,6 +315,13 @@ export const termResize = (id: string, cols: number, rows: number) =>
   invoke<null>("term_resize", { id, cols, rows });
 export const termKill = (id: string) => invoke<null>("term_kill", { id });
 export const termScrollback = (id: string) => invoke<string>("term_scrollback", { id });
+
+export const recoverNudge = (sessionId: string) =>
+  invoke<RecoverResult>("recover_nudge", { sessionId });
+export const recoverKill = (pid: number, cwd: string) =>
+  invoke<RecoverResult>("recover_kill", { pid, cwd });
+export const recoverRestart = (pid: number, cwd: string, profileId: string) =>
+  invoke<RecoverResult>("recover_restart", { pid, cwd, profileId });
 
 export const modelsOverview = () => invoke<ModelsOverview>("models_overview");
 export const providerSave = (provider: OcProviderInput) =>
