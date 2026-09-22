@@ -1,6 +1,9 @@
 pub mod claude;
+pub mod indexer;
 pub mod live;
 pub mod model;
 pub mod opencode;
+pub mod pricing;
 pub mod process;
+pub mod store;
 pub mod transcript;
