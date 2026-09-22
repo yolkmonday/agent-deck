@@ -1,5 +1,6 @@
 import { Settings } from "lucide-react";
 import { useState } from "react";
+import { RecoverMenu } from "@/components/RecoverMenu";
 import { SettingsPopover } from "@/components/SettingsPopover";
 import type { AttentionMode, Settings as SettingsValue } from "@/lib/api";
 import type { Orphan, Session } from "@/lib/types";
@@ -12,6 +13,7 @@ export const AttentionBar = ({
   nowMs,
   settings,
   onJump,
+  onOpenTerminal,
   onMode,
   onNotifySound,
   onMinutes,
@@ -22,6 +24,7 @@ export const AttentionBar = ({
   nowMs: number;
   settings: SettingsValue;
   onJump: () => void;
+  onOpenTerminal: (termId: string) => void;
   onMode: (mode: AttentionMode) => void;
   onNotifySound: (enabled: boolean) => void;
   onMinutes: (value: { stallMinutes: number; slowToolMinutes: number }) => void;
@@ -62,6 +65,9 @@ export const AttentionBar = ({
           >
             Buka
           </button>
+        )}
+        {!first && bad && bad.health === "stalled" && (
+          <RecoverMenu session={bad} onOpenTerminal={onOpenTerminal} />
         )}
         <div className={`relative shrink-0 ${jumpable ? "" : "ml-auto"}`}>
           <button

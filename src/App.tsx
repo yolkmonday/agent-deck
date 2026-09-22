@@ -161,6 +161,7 @@ const App = () => {
           nowMs={nowMs}
           settings={settings}
           onJump={firstJump}
+          onOpenTerminal={goToTerminal}
           onMode={(mode) => saveSettings({ ...settings, attentionMode: mode })}
           onNotifySound={(notifySound) => saveSettings({ ...settings, notifySound })}
           onMinutes={(value) => saveSettings({ ...settings, ...value })}

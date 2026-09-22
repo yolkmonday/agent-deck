@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 import { AgentIcon } from "@/components/BrandIcon";
 import { ClaudeThinking } from "@/components/brainless/claude/claude-thinking";
+import { RecoverMenu } from "@/components/RecoverMenu";
 import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
 import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session, SubAgent } from "@/lib/types";
@@ -270,6 +271,7 @@ export const SessionCard = ({
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="font-mono text-[11.5px] whitespace-nowrap text-fg-3">{since}</span>
+          <RecoverMenu session={s} onOpenTerminal={onOpenTerminal} />
           {waiting ? (
             <button
               type="button"

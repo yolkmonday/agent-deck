@@ -2,6 +2,7 @@ mod config;
 mod probe;
 mod projects;
 mod providers;
+mod recover;
 mod secrets;
 mod terminal;
 
@@ -764,6 +765,31 @@ fn table_accounts(
 fn term_profiles() -> Vec<TermProfile> {
     TerminalRegistry::profiles()
 }
+
+/// The one place a PTY session is spawned, so a restart wires up its events
+/// exactly like the Terminal page's own button does.
+fn start_terminal(
+    app: &tauri::AppHandle,
+    state: &Arc<AppState>,
+    profile_id: &str,
+    cwd: &str,
+) -> Result<TermSession, String> {
+    let mut reg = state.terminals.lock().map_err(|e| e.to_string())?;
+    let data_app = app.clone();
+    let exit_app = app.clone();
+    reg.start(
+        profile_id,
+        cwd,
+        move |evt: TermDataEvent| {
+            let _ = data_app.emit("term://data", evt);
+        },
+        move |evt: TermExitEvent| {
+            let _ = exit_app.emit("term://exit", evt);
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn term_start(
     profile_id: String,
@@ -771,19 +797,7 @@ fn term_start(
     app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
 ) -> Result<TermSession, String> {
-    let mut reg = state.terminals.lock().map_err(|e| e.to_string())?;
-    let data_app = app.clone();
-    reg.start(
-        &profile_id,
-        &cwd,
-        move |evt: TermDataEvent| {
-            let _ = data_app.emit("term://data", evt);
-        },
-        move |evt: TermExitEvent| {
-            let _ = app.emit("term://exit", evt);
-        },
-    )
-    .map_err(|e| e.to_string())
+    start_terminal(&app, state.inner(), &profile_id, &cwd)
 }
 
 #[tauri::command]
@@ -833,6 +847,118 @@ fn term_scrollback(id: String, state: State<'_, Arc<AppState>>) -> Result<String
         .lock()
         .map_err(|e| e.to_string())?
         .scrollback(&id))
+}
+
+/// How long an agent gets to flush its transcript after SIGTERM before SIGKILL.
+const KILL_GRACE_MS: u64 = 5_000;
+
+/// What the recovery actions report back. Every failure is a readable message
+/// with `ok: false`, never a thrown error, so a refusal (for example a pid that
+/// is no longer an agent) reads as information rather than a crash.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoverResult {
+    ok: bool,
+    action: String,
+    message: String,
+    new_term_id: Option<String>,
+}
+
+impl RecoverResult {
+    fn done(action: &str, message: String, new_term_id: Option<String>) -> RecoverResult {
+        RecoverResult {
+            ok: true,
+            action: action.to_string(),
+            message,
+            new_term_id,
+        }
+    }
+
+    fn refused(action: &str, message: String) -> RecoverResult {
+        RecoverResult {
+            ok: false,
+            action: action.to_string(),
+            message,
+            new_term_id: None,
+        }
+    }
+}
+
+/// Types Enter into a session the dashboard owns. A session started in another
+/// terminal has no stdin here, and saying so is the honest answer.
+#[tauri::command]
+fn recover_nudge(
+    session_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<RecoverResult, String> {
+    let mut reg = state.terminals.lock().map_err(|e| e.to_string())?;
+    let owned = reg.list().into_iter().any(|t| t.id == session_id && t.alive);
+    if !owned {
+        return Ok(RecoverResult::refused(
+            "nudge",
+            "Sesi ini jalan di terminal lain, tidak bisa dikirimi tombol.".to_string(),
+        ));
+    }
+    match reg.write(&session_id, "\r") {
+        Ok(()) => Ok(RecoverResult::done(
+            "nudge",
+            "Enter dikirim ke sesi.".to_string(),
+            None,
+        )),
+        Err(e) => Ok(RecoverResult::refused("nudge", e.to_string())),
+    }
+}
+
+#[tauri::command]
+fn recover_kill(
+    pid: u32,
+    cwd: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<RecoverResult, String> {
+    let _ = &state;
+    let procs = SystemProcessTable;
+    let kind = match recover::verify(pid, &procs) {
+        Ok(kind) => kind,
+        Err(e) => return Ok(RecoverResult::refused("kill", e)),
+    };
+    match recover::terminate(pid, &procs, KILL_GRACE_MS) {
+        Ok(forced) => Ok(RecoverResult::done(
+            "kill",
+            format!(
+                "Proses {kind} di {cwd} dihentikan.{}",
+                if forced { " (terpaksa SIGKILL)" } else { "" }
+            ),
+            None,
+        )),
+        Err(e) => Ok(RecoverResult::refused("kill", e)),
+    }
+}
+
+/// A restart is not a resume: the old conversation is gone and a new agent
+/// process starts in the same folder. The message says so every time.
+#[tauri::command]
+fn recover_restart(
+    pid: u32,
+    cwd: String,
+    profile_id: String,
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<RecoverResult, String> {
+    let procs = SystemProcessTable;
+    if let Err(e) = recover::verify(pid, &procs) {
+        return Ok(RecoverResult::refused("restart", e));
+    }
+    if let Err(e) = recover::terminate(pid, &procs, KILL_GRACE_MS) {
+        return Ok(RecoverResult::refused("restart", e));
+    }
+    match start_terminal(&app, state.inner(), &profile_id, &cwd) {
+        Ok(session) => Ok(RecoverResult::done(
+            "restart",
+            format!("Sesi baru dimulai di {cwd}. Percakapan lama tidak ikut pindah."),
+            Some(session.id),
+        )),
+        Err(e) => Ok(RecoverResult::refused("restart", e)),
+    }
 }
 
 fn home_dir() -> String {
@@ -1764,6 +1890,9 @@ pub fn run() {
             term_resize,
             term_kill,
             term_scrollback,
+            recover_nudge,
+            recover_kill,
+            recover_restart,
             models_overview,
             provider_save,
             provider_delete,
