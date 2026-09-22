@@ -1,3 +1,4 @@
+use crate::billing::{BillingMode, BillingTable};
 use crate::claude::{read_claude_sessions, ClaudeLive};
 use crate::health::{self, Thresholds};
 use crate::model::{Activity, ActivityKind, Agent, LiveSnapshot, Orphan, Session, Status};
@@ -91,7 +92,7 @@ fn grouping(info: RepoInfo, home: &str) -> (String, String, bool, Option<String>
     (group, group_root, info.is_worktree, info.worktree_name)
 }
 
-fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds: &Thresholds, now_ms: i64) -> Session {
+fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, billing: &BillingTable, thresholds: &Thresholds, now_ms: i64, info: RepoInfo) -> Session {
     let activity = match (&o.running_tool, o.status) {
         (Some(t), _) => Some(Activity { kind: ActivityKind::Tool, label: t.clone(), detail: None }),
         (None, Status::Busy) => Some(Activity {
@@ -111,8 +112,14 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds
     let tool = o.running_tool.as_deref().zip(tool_running_ms);
     let (health, health_reason) = health::evaluate(o.status, quiet_ms, tool, thresholds);
     let own_tokens = o.tokens.clone();
+    let billing_mode = o
+        .model
+        .as_deref()
+        .and_then(|m| billing.match_account(m))
+        .map(|a| a.mode)
+        .unwrap_or(BillingMode::Payg);
     let cwd = o.directory;
-    let (group, group_root, is_worktree, worktree_name) = grouping(repo::resolve(Path::new(&cwd)), home);
+    let (group, group_root, is_worktree, worktree_name) = grouping(info, home);
     Session {
         id: o.id,
         agent: Agent::Opencode,
@@ -131,6 +138,7 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds
         own_tokens,
         subagents: Vec::new(),
         cost_usd,
+        billing_mode,
         priced,
         started_at_ms: None,
         updated_at_ms: o.updated_at_ms,
@@ -174,7 +182,7 @@ impl LiveCollector {
         info
     }
 
-    fn claude_session(&mut self, c: ClaudeLive, prices: &PriceTable, thresholds: &Thresholds, now_ms: i64) -> Session {
+    fn claude_session(&mut self, c: ClaudeLive, prices: &PriceTable, billing: &BillingTable, thresholds: &Thresholds, now_ms: i64) -> Session {
         let projects = self.paths.claude_projects.clone();
         let (path, state) = self
             .transcripts
@@ -220,6 +228,11 @@ impl LiveCollector {
         let (health, health_reason) = health::evaluate(c.status, quiet_ms, tool, thresholds);
         let home = self.paths.home.clone();
         let (group, group_root, is_worktree, worktree_name) = grouping(self.repo_info(&c.cwd), &home);
+        let billing_mode = model
+            .as_deref()
+            .and_then(|m| billing.match_account(m))
+            .map(|a| a.mode)
+            .unwrap_or(BillingMode::Payg);
         Session {
             id: c.session_id.clone(),
             agent: Agent::Claude,
@@ -238,6 +251,7 @@ impl LiveCollector {
             own_tokens,
             subagents,
             cost_usd,
+            billing_mode,
             priced,
             started_at_ms: c.started_at_ms,
             updated_at_ms: c.updated_at_ms,
@@ -330,7 +344,13 @@ impl LiveCollector {
         meta
     }
 
-    pub fn snapshot(&mut self, now_ms: i64, prices: &PriceTable, thresholds: &Thresholds) -> LiveSnapshot {
+    pub fn snapshot(
+        &mut self,
+        now_ms: i64,
+        prices: &PriceTable,
+        billing: &BillingTable,
+        thresholds: &Thresholds,
+    ) -> LiveSnapshot {
         let mut sessions = Vec::new();
         let mut warnings = Vec::new();
 
@@ -345,7 +365,7 @@ impl LiveCollector {
             live_ids.iter().map(|(sid, cwd)| self.session_subagents_dir(sid, cwd)).collect();
         self.meta_cache.retain(|path, _| live_metas.contains(path.parent().unwrap_or(path)));
         for c in claude {
-            sessions.push(self.claude_session(c, prices, thresholds, now_ms));
+            sessions.push(self.claude_session(c, prices, billing, thresholds, now_ms));
         }
 
         let mut session_dirs: HashSet<String> = sessions.iter().map(|s| s.cwd.clone()).collect();
@@ -353,7 +373,10 @@ impl LiveCollector {
             Ok(list) => {
                 for o in list {
                     session_dirs.insert(o.directory.clone());
-                    sessions.push(opencode_session(o, &self.paths.home, prices, thresholds, now_ms));
+                    // Resolved through the cache, not `repo::resolve`, so an opencode
+                    // session does not re-read `.git` on every tick.
+                    let info = self.repo_info(&o.directory);
+                    sessions.push(opencode_session(o, &self.paths.home, prices, billing, thresholds, now_ms, info));
                 }
             }
             Err(e) => warnings.push(format!("opencode: {e}")),
@@ -361,10 +384,16 @@ impl LiveCollector {
 
         let orphans = self.orphans(now_ms, &session_dirs);
 
+        // Sorting by `updated_at_ms` reshuffled the board every tick, because that
+        // stamp moves constantly on a working session. Cards now hold their place:
+        // only a session that needs a human jumps to the front, and the rest are
+        // ordered by when they started, which never changes while they live.
         sessions.sort_by(|a, b| {
             let wa = a.status == Status::Waiting;
             let wb = b.status == Status::Waiting;
-            wb.cmp(&wa).then(b.updated_at_ms.cmp(&a.updated_at_ms))
+            wb.cmp(&wa)
+                .then(a.started_at_ms.unwrap_or(i64::MAX).cmp(&b.started_at_ms.unwrap_or(i64::MAX)))
+                .then(a.id.cmp(&b.id))
         });
         let cost_usd = sessions.iter().map(|s| s.cost_usd).sum();
         let unpriced = sessions.iter().filter(|s| !s.priced).count();
@@ -391,6 +420,7 @@ impl LiveCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::billing::BillingAccount;
     use crate::health::{Health, Thresholds};
     use crate::model::{ActivityKind, Agent};
     use crate::process::{FakeProcessTable, ProcInfo};
@@ -403,6 +433,24 @@ mod tests {
         fs::create_dir_all(&paths.claude_sessions).unwrap();
         fs::create_dir_all(&paths.claude_projects).unwrap();
         (tmp, paths)
+    }
+
+    fn claude_session_started(
+        paths: &Paths,
+        pid: u32,
+        sid: &str,
+        cwd: &str,
+        status: &str,
+        updated: i64,
+        started: i64,
+    ) {
+        fs::write(
+            paths.claude_sessions.join(format!("{pid}.json")),
+            format!(
+                r#"{{"pid":{pid},"sessionId":"{sid}","cwd":"{cwd}","status":"{status}","updatedAt":{updated},"startedAt":{started}}}"#
+            ),
+        )
+        .unwrap();
     }
 
     fn claude_session(paths: &Paths, pid: u32, sid: &str, cwd: &str, status: &str, updated: i64) {
@@ -435,7 +483,7 @@ mod tests {
         procs.alive.insert(100);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
 
-        let snap = c.snapshot(2000, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(2000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions.len(), 1);
         let s = &snap.sessions[0];
         assert_eq!(s.agent, Agent::Claude);
@@ -451,16 +499,27 @@ mod tests {
     }
 
     #[test]
-    fn waiting_sessions_sort_first_then_most_recent() {
+    fn waiting_sorts_first_and_the_rest_hold_a_stable_order() {
         let (_tmp, paths) = setup();
-        claude_session(&paths, 1, "a", "/x/a", "busy", 500);
-        claude_session(&paths, 2, "b", "/x/b", "waiting", 100);
-        claude_session(&paths, 3, "c", "/x/c", "busy", 900);
+        // `updatedAt` deliberately disagrees with the start order: it moves every
+        // tick on a working session, so it must NOT decide where a card sits.
+        claude_session_started(&paths, 1, "a", "/x/a", "busy", 500, 10);
+        claude_session_started(&paths, 2, "b", "/x/b", "waiting", 100, 30);
+        claude_session_started(&paths, 3, "c", "/x/c", "busy", 900, 20);
         let mut procs = FakeProcessTable::default();
         procs.alive.extend([1, 2, 3]);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
-        let ids: Vec<String> = c.snapshot(1000, &PriceTable::defaults(), &Thresholds::defaults()).sessions.into_iter().map(|s| s.id).collect();
-        assert_eq!(ids, vec!["b", "c", "a"]);
+        let ids = |c: &mut LiveCollector, now: i64| -> Vec<String> {
+            c.snapshot(now, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults())
+                .sessions
+                .into_iter()
+                .map(|s| s.id)
+                .collect()
+        };
+        // waiting first, then oldest start first
+        assert_eq!(ids(&mut c, 1000), vec!["b", "a", "c"]);
+        // and the order does not drift as time passes
+        assert_eq!(ids(&mut c, 9000), vec!["b", "a", "c"]);
     }
 
     #[test]
@@ -474,7 +533,7 @@ mod tests {
         let mut procs = FakeProcessTable::default();
         procs.alive.insert(9);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
-        let a = c.snapshot(10, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0].activity.clone().unwrap();
+        let a = c.snapshot(10, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults()).sessions[0].activity.clone().unwrap();
         assert_eq!(a.kind, ActivityKind::Waiting);
         assert_eq!(a.detail.as_deref(), Some("input needed"));
     }
@@ -497,7 +556,7 @@ mod tests {
         procs.alive.extend([1, 2]);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
 
-        let snap = c.snapshot(100, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(100, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         let a = snap.sessions.iter().find(|s| s.cwd.ends_with("/a")).unwrap();
         let b = snap.sessions.iter().find(|s| s.cwd.ends_with("/b")).unwrap();
         assert_eq!(a.tokens.output, 11);
@@ -514,7 +573,7 @@ mod tests {
         procs.alive.insert(1);
         procs.procs.push(ProcInfo { pid: 50, command: "/x/opencode run t --dir /d".into() });
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
-        let snap = c.snapshot(10, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(10, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions.len(), 1);
         assert_eq!(snap.warnings.len(), 1);
         assert!(snap.warnings[0].starts_with("opencode:"));
@@ -554,7 +613,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         let s = &snap.sessions[0];
         assert!(close(s.cost_usd, 15.0));
         assert!(s.priced);
@@ -574,7 +633,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         let s = &snap.sessions[0];
         assert_eq!(s.cost_usd, 0.0);
         assert!(!s.priced);
@@ -587,7 +646,7 @@ mod tests {
         claude_session(&paths, 1, "s1", "/Users/yolk/Dev/kirimi", "busy", 10);
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions[0].model, None);
         assert!(!snap.sessions[0].priced);
         assert_eq!(snap.unpriced, 1);
@@ -612,7 +671,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1, 2]);
 
-        let snap = c.snapshot(30, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(30, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         let expected: f64 = snap.sessions.iter().map(|s| s.cost_usd).sum();
         assert!(close(snap.cost_usd, expected));
         assert!(close(snap.cost_usd, 90.0));
@@ -631,7 +690,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let a = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
+        let a = c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         let mut b = a.clone();
         b.cost_usd += 1.0;
         assert!(!a.same_content(&b));
@@ -662,7 +721,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(620_000, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(620_000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions[0].quiet_ms, 120_000);
     }
 
@@ -672,7 +731,7 @@ mod tests {
         claude_session(&paths, 1, "s1", "/Users/yolk/Dev/a", "busy", 500_000);
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(560_000, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(560_000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions[0].quiet_ms, 60_000);
     }
 
@@ -689,14 +748,14 @@ mod tests {
         let transcript = paths.claude_projects.join("-Users-yolk-Dev-a").join("s1.jsonl");
         let mut c = collector(paths, &[1]);
 
-        let open = c.snapshot(160_000, &PriceTable::defaults(), &Thresholds::defaults());
+        let open = c.snapshot(160_000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(open.sessions[0].tool_running_ms, Some(60_000));
 
         append_line(
             &transcript,
             "{\"type\":\"user\",\"timestamp\":200000,\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\"}]}}",
         );
-        let closed = c.snapshot(260_000, &PriceTable::defaults(), &Thresholds::defaults());
+        let closed = c.snapshot(260_000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(closed.sessions[0].tool_running_ms, None);
     }
 
@@ -712,7 +771,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(100_000 + 6 * MIN, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(100_000 + 6 * MIN, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         let s = &snap.sessions[0];
         assert_eq!(s.health, Health::Stalled);
         assert!(s.health_reason.as_deref().is_some_and(|r| !r.is_empty()));
@@ -726,7 +785,7 @@ mod tests {
         procs.start_times.insert(77, 400_000);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
 
-        let snap = c.snapshot(1_000_000, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(1_000_000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.orphans.len(), 1);
         let o = &snap.orphans[0];
         assert_eq!(o.pid, 77);
@@ -787,7 +846,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         let subs = &snap.sessions[0].subagents;
         assert_eq!(subs.len(), 1);
         assert_eq!(subs[0].id, "a1");
@@ -820,7 +879,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert!(snap.sessions[0].subagents.is_empty());
         assert_eq!(snap.sessions[0].tokens.output, 10, "a finished agent is not folded in");
     }
@@ -845,7 +904,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let s = &c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0];
+        let s = &c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults()).sessions[0];
         assert_eq!(s.tokens.output, 15);
         assert_eq!(s.own_tokens.output, 10);
         assert_eq!(s.subagents[0].tokens.output, 5);
@@ -872,7 +931,7 @@ mod tests {
         let mut c = collector(paths, &[1]);
 
         let prices = PriceTable::defaults();
-        let s = &c.snapshot(20, &prices, &Thresholds::defaults()).sessions[0];
+        let s = &c.snapshot(20, &prices, &BillingTable::defaults(), &Thresholds::defaults()).sessions[0];
         let own = prices.cost_usd("claude-sonnet-5", &s.own_tokens);
         let sub = s.subagents[0].cost_usd;
         assert!(sub > 0.0);
@@ -893,7 +952,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let s = &c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0];
+        let s = &c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults()).sessions[0];
         assert!(s.subagents.is_empty());
         assert_eq!(s.tokens.output, 10);
         assert_eq!(s.own_tokens.output, 10);
@@ -927,11 +986,50 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let subs = &c.snapshot(100_000, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0].subagents;
+        let subs = &c.snapshot(100_000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults()).sessions[0].subagents;
         let ids: Vec<&str> = subs.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, vec!["new", "old"]);
         assert_eq!(subs[0].started_ms, Some(90_000));
         assert_eq!(subs[1].started_ms, Some(20_000));
+    }
+
+    #[test]
+    fn billing_mode_follows_the_matched_account() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/kirimi", "busy", 10);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/kirimi",
+            "s1",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":1}}}",
+        );
+        let mut c = collector(paths, &[1]);
+        let billing = BillingTable::new(vec![BillingAccount {
+            id: "sub".into(),
+            label: "Claude Max".into(),
+            mode: BillingMode::Subscription,
+            matches: vec!["claude-".into()],
+            monthly_usd: Some(200.0),
+            renewal_day: Some(14),
+            credit_usd: None,
+            started_on: None,
+            expires_on: None,
+        }]);
+
+        let snap = c.snapshot(20, &PriceTable::defaults(), &billing, &Thresholds::defaults());
+        let s = &snap.sessions[0];
+        assert_eq!(s.billing_mode, BillingMode::Subscription);
+        // The token figure still reports what these tokens would have cost.
+        assert!(s.cost_usd > 0.0);
+    }
+
+    #[test]
+    fn unmatched_model_is_payg() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/kirimi", "busy", 10);
+        let mut c = collector(paths, &[1]);
+        let snap = c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
+        assert_eq!(snap.sessions[0].billing_mode, BillingMode::Payg);
     }
 
     #[test]
@@ -953,7 +1051,7 @@ mod tests {
         procs.start_times.insert(77, 400_000);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
 
-        let snap = c.snapshot(1_000_000, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(1_000_000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions.len(), 1);
         assert!(snap.orphans.is_empty());
     }
@@ -981,7 +1079,7 @@ mod tests {
         claude_session(&paths, 2, "s2", &wt, "busy", 20);
         let mut c = collector(paths, &[1, 2]);
 
-        let snap = c.snapshot(30, &PriceTable::defaults(), &Thresholds::defaults());
+        let snap = c.snapshot(30, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         let a = snap.sessions.iter().find(|s| s.id == "s1").unwrap();
         let b = snap.sessions.iter().find(|s| s.id == "s2").unwrap();
         assert_eq!(a.group_root, main);
@@ -1004,7 +1102,7 @@ mod tests {
         claude_session(&paths, 1, "s1", at, "busy", 10);
         let mut c = collector(paths, &[1]);
 
-        let s = &c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0];
+        let s = &c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults()).sessions[0];
         assert_eq!(s.group, "kirimi");
         assert_eq!(s.group_root, at);
         assert!(!s.is_worktree);
@@ -1032,9 +1130,9 @@ mod tests {
             }),
         );
 
-        c.snapshot(30, &PriceTable::defaults(), &Thresholds::defaults());
+        c.snapshot(30, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(calls.load(Ordering::SeqCst), 2, "once per distinct cwd");
-        c.snapshot(40, &PriceTable::defaults(), &Thresholds::defaults());
+        c.snapshot(40, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(calls.load(Ordering::SeqCst), 2, "not re-read on the next tick");
     }
 }

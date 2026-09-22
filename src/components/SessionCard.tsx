@@ -2,14 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 import { AgentIcon } from "@/components/BrandIcon";
 import { ClaudeThinking } from "@/components/brainless/claude/claude-thinking";
-import { formatUsd } from "@/lib/cost";
+import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
 import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session, SubAgent } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
-
-// One busy session must not stretch its row past its neighbours, so only the
-// first few running subagents get a line of their own.
-const SUBAGENT_ROWS = 4;
 
 const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 const agentName = { claude: "Claude", opencode: "opencode", codex: "Codex" } as const;
@@ -86,6 +82,7 @@ export const SessionCard = ({
   const startSession = useTerminal((st) => st.start);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [subagentsOpen, setSubagentsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -194,28 +191,48 @@ export const SessionCard = ({
           </span>
         )}
       </div>
+      {/* Collapsed by default: a card whose height changed every time a subagent
+          started or finished made the whole board jump around. One stable line. */}
       {s.subagents.length > 0 && (
-        <div className="flex min-w-0 flex-col divide-y divide-border border-t border-border pt-1">
-          <span className="text-[11.5px] text-fg-3">Subagent ({s.subagents.length})</span>
-          {s.subagents.slice(0, SUBAGENT_ROWS).map((sub) => (
-            <SubAgentRow key={sub.id} sub={sub} />
-          ))}
-          {s.subagents.length > SUBAGENT_ROWS && (
-            <span className="pt-1.5 text-[11.5px] text-fg-3">
-              +{s.subagents.length - SUBAGENT_ROWS} lagi
-            </span>
+        <div className="flex min-w-0 flex-col border-t border-border pt-1.5">
+          <button
+            type="button"
+            onClick={() => setSubagentsOpen((v) => !v)}
+            aria-expanded={subagentsOpen}
+            className="flex cursor-pointer items-center gap-1.5 text-left text-[11.5px] text-fg-3 hover:text-fg-2"
+          >
+            <Icon
+              icon="lucide:chevron-right"
+              width={12}
+              height={12}
+              className={subagentsOpen ? "rotate-90" : ""}
+            />
+            {s.subagents.length} subagent jalan
+          </button>
+          {subagentsOpen && (
+            <div className="mt-1 flex min-w-0 flex-col divide-y divide-border">
+              {s.subagents.map((sub) => (
+                <SubAgentRow key={sub.id} sub={sub} />
+              ))}
+            </div>
           )}
         </div>
       )}
       <div className="mt-auto flex flex-col gap-2">
         <div className="flex items-center gap-3 font-mono text-[11.5px] whitespace-nowrap">
           <span className="text-fg-2">{formatTokens(totalTokens(s.tokens))}</span>
-          {s.priced ? (
-            <span className="text-fg-2">{formatUsd(s.costUsd)}</span>
-          ) : (
+          {!s.priced ? (
             <span className="text-fg-3" title="Model ini belum ada di tabel harga.">
               -
             </span>
+          ) : s.billingMode === "subscription" ? (
+            // A subscription's tokens cost nothing extra, so the figure is an
+            // estimate at API rates and must never read like a bill.
+            <span className="text-fg-3" title={NOTIONAL_HINT}>
+              {formatNotional(s.costUsd)}
+            </span>
+          ) : (
+            <span className="text-fg-2">{formatUsd(s.costUsd)}</span>
           )}
         </div>
         <div className="flex items-center justify-between gap-2">

@@ -2,6 +2,7 @@ export type Agent = "claude" | "opencode" | "codex";
 export type Status = "busy" | "waiting" | "idle";
 export type ActivityKind = "tool" | "waiting" | "thinking" | "done";
 export type Health = "ok" | "slow" | "stalled";
+export type BillingMode = "subscription" | "prepaid" | "payg";
 
 export interface TokenUsage {
   input: number;
@@ -46,6 +47,9 @@ export interface Session {
   ownTokens: TokenUsage;
   subagents: SubAgent[];
   costUsd: number;
+  /** How the model behind `costUsd` is paid for. `costUsd` is always the
+   *  API-rate figure; only a subscription makes it notional rather than spend. */
+  billingMode: BillingMode;
   priced: boolean;
   startedAtMs: number | null;
   updatedAtMs: number;

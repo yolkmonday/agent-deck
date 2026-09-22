@@ -1,4 +1,6 @@
+use crate::billing::{split_cost, BillingMode, BillingTable};
 use crate::model::{Agent, TokenUsage};
+use crate::pricing::PriceTable;
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
@@ -125,6 +127,23 @@ pub struct TotalsAgg {
     pub tokens: TokenUsage,
     pub messages: i64,
 }
+
+/// One billing account's share of a window. `spend_usd` is money that moved and
+/// `notional_usd` is what the same tokens would have cost at API rates; they are
+/// equal for everything except a subscription, where spend is zero.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountAgg {
+    pub account_id: String,
+    pub label: String,
+    pub mode: BillingMode,
+    pub tokens: TokenUsage,
+    pub spend_usd: f64,
+    pub notional_usd: f64,
+}
+
+/// The label of the synthetic account that collects models no account claims.
+/// These are paid per token by default, exactly as before billing existed.
+pub const UNMATCHED_LABEL: &str = "Tanpa akun";
 
 fn agent_str(a: Agent) -> &'static str {
     match a {
@@ -424,6 +443,91 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Per-billing-account totals for `[from_ms, to_ms)`, with spend and notional
+    /// kept apart. Cost is summed per (model, account) rather than per account, so
+    /// each model is priced at its own rate. Order follows the table, with the
+    /// synthetic pay-as-you-go group last.
+    pub fn by_account(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+        table: &BillingTable,
+        prices: &PriceTable,
+    ) -> Result<Vec<AccountAgg>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT model, SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), SUM(reasoning) \
+             FROM message WHERE ts_ms >= ?1 AND ts_ms < ?2 GROUP BY model",
+        )?;
+        let rows = stmt.query_map([from_ms, to_ms], |r| {
+            Ok((r.get::<_, String>(0)?, usage_from_row(r, 1)?))
+        })?;
+
+        let mut out: Vec<AccountAgg> = Vec::new();
+        let mut unmatched: Option<AccountAgg> = None;
+        let mut add = |id: &str, label: &str, mode: BillingMode, tokens: &TokenUsage, spend: f64, notional: f64| {
+            match out.iter_mut().find(|a| a.account_id == id) {
+                Some(a) => {
+                    a.tokens.add(tokens);
+                    a.spend_usd += spend;
+                    a.notional_usd += notional;
+                }
+                None => out.push(AccountAgg {
+                    account_id: id.to_string(),
+                    label: label.to_string(),
+                    mode,
+                    tokens: tokens.clone(),
+                    spend_usd: spend,
+                    notional_usd: notional,
+                }),
+            }
+        };
+
+        for row in rows {
+            let (model, tokens) = row?;
+            let notional = prices.cost_usd(&model, &tokens);
+            match table.match_account(&model) {
+                Some(a) => {
+                    let (spend, notional) = split_cost(Some(a), notional);
+                    add(&a.id, &a.label, a.mode, &tokens, spend, notional);
+                }
+                None => {
+                    let (spend, notional) = split_cost(None, notional);
+                    let group = unmatched.get_or_insert_with(|| AccountAgg {
+                        account_id: String::new(),
+                        label: UNMATCHED_LABEL.to_string(),
+                        mode: BillingMode::Payg,
+                        tokens: TokenUsage::default(),
+                        spend_usd: 0.0,
+                        notional_usd: 0.0,
+                    });
+                    group.tokens.add(&tokens);
+                    group.spend_usd += spend;
+                    group.notional_usd += notional;
+                }
+            }
+        }
+
+        // Accounts the table declares but that saw no traffic still get a row, so
+        // the monthly view can show a plan whose period had no messages.
+        for a in table.accounts() {
+            if !out.iter().any(|g| g.account_id == a.id) {
+                out.push(AccountAgg {
+                    account_id: a.id.clone(),
+                    label: a.label.clone(),
+                    mode: a.mode,
+                    tokens: TokenUsage::default(),
+                    spend_usd: 0.0,
+                    notional_usd: 0.0,
+                });
+            }
+        }
+
+        if let Some(group) = unmatched {
+            out.push(group);
+        }
+        Ok(out)
+    }
+
     pub fn totals(&self, since_ms: i64) -> Result<TotalsAgg> {        self.conn.query_row(
             "SELECT COALESCE(SUM(input),0), COALESCE(SUM(output),0), COALESCE(SUM(cache_read),0), \
                     COALESCE(SUM(cache_write),0), COALESCE(SUM(reasoning),0), COUNT(*) \
@@ -553,6 +657,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::billing::BillingAccount;
 
     fn row(id: &str, agent: Agent, model: &str, ts_ms: i64, u: TokenUsage) -> MessageRow {
         MessageRow {
@@ -926,5 +1031,106 @@ mod tests {
     fn missing_setting_is_none() {
         let (_tmp, s) = open_store();
         assert_eq!(s.setting("nope").unwrap(), None);
+    }
+
+    fn account(id: &str, label: &str, mode: BillingMode, matches: &[&str]) -> BillingAccount {
+        BillingAccount {
+            id: id.into(),
+            label: label.into(),
+            mode,
+            matches: matches.iter().map(|s| s.to_string()).collect(),
+            monthly_usd: (mode == BillingMode::Subscription).then_some(200.0),
+            renewal_day: (mode == BillingMode::Subscription).then_some(14),
+            credit_usd: (mode == BillingMode::Prepaid).then_some(20.0),
+            started_on: (mode == BillingMode::Prepaid).then(|| "2026-03-01".to_string()),
+            expires_on: None,
+        }
+    }
+
+    #[test]
+    fn by_account_groups_messages_and_sums_both_numbers() {
+        let (_tmp, mut s) = open_store();
+        // 1M output on claude-sonnet-5 costs $15; 1M on kn/deepseek costs $1.10.
+        s.upsert_messages(&[
+            row("claude:a", Agent::Claude, "claude-sonnet-5", 100, usage(0, 1_000_000, 0, 0)),
+            row("claude:b", Agent::Claude, "claude-sonnet-5", 200, usage(0, 1_000_000, 0, 0)),
+            row("oc:a", Agent::Opencode, "kn/deepseek-v4-1-flash", 300, usage(0, 1_000_000, 0, 0)),
+        ])
+        .unwrap();
+        let table = BillingTable::new(vec![
+            account("sub", "Claude Max", BillingMode::Subscription, &["claude-"]),
+            account("pre", "Kenari topup", BillingMode::Prepaid, &["kn/"]),
+        ]);
+
+        let groups = s.by_account(0, 10_000, &table, &PriceTable::defaults()).unwrap();
+        assert_eq!(groups.len(), 2);
+
+        let sub = groups.iter().find(|g| g.account_id == "sub").unwrap();
+        assert_eq!(sub.tokens.output, 2_000_000);
+        assert_eq!(sub.spend_usd, 0.0, "subscription usage never reaches spend");
+        assert!((sub.notional_usd - 30.0).abs() < 1e-9);
+
+        let pre = groups.iter().find(|g| g.account_id == "pre").unwrap();
+        assert_eq!(pre.tokens.output, 1_000_000);
+        assert!((pre.spend_usd - 1.10).abs() < 1e-9);
+        assert!((pre.notional_usd - 1.10).abs() < 1e-9);
+    }
+
+    #[test]
+    fn by_account_puts_unmatched_models_in_the_fallback_group() {
+        let (_tmp, mut s) = open_store();
+        s.upsert_messages(&[
+            row("claude:a", Agent::Claude, "claude-sonnet-5", 100, usage(0, 1_000_000, 0, 0)),
+            row("codex:a", Agent::Codex, "gpt-5.4", 200, usage(0, 1_000_000, 0, 0)),
+            row("weird", Agent::Claude, "totally-unknown", 300, usage(0, 1_000_000, 0, 0)),
+        ])
+        .unwrap();
+        let table = BillingTable::new(vec![account(
+            "sub",
+            "Claude Max",
+            BillingMode::Subscription,
+            &["claude-"],
+        )]);
+
+        let groups = s.by_account(0, 10_000, &table, &PriceTable::defaults()).unwrap();
+        let fallback = groups
+            .iter()
+            .find(|g| g.account_id.is_empty())
+            .expect("a fallback group");
+        assert_eq!(fallback.label, UNMATCHED_LABEL);
+        assert_eq!(fallback.mode, BillingMode::Payg);
+        assert_eq!(fallback.tokens.output, 2_000_000);
+        // gpt-5.4 output is $10/M; the unknown model is not priced at all.
+        assert!((fallback.spend_usd - 10.0).abs() < 1e-9);
+        assert!((fallback.notional_usd - 10.0).abs() < 1e-9);
+        assert_eq!(groups.iter().find(|g| g.account_id == "sub").unwrap().tokens.output, 1_000_000);
+    }
+
+    #[test]
+    fn by_account_respects_the_time_window() {
+        let (_tmp, mut s) = open_store();
+        s.upsert_messages(&[
+            row("old", Agent::Claude, "claude-sonnet-5", 100, usage(0, 1_000_000, 0, 0)),
+            row("in", Agent::Claude, "claude-sonnet-5", 5_000, usage(0, 1_000_000, 0, 0)),
+            row("edge", Agent::Claude, "claude-sonnet-5", 9_000, usage(0, 1_000_000, 0, 0)),
+        ])
+        .unwrap();
+        let table = BillingTable::new(vec![account(
+            "sub",
+            "Claude Max",
+            BillingMode::Subscription,
+            &["claude-"],
+        )]);
+
+        let groups = s.by_account(1_000, 9_000, &table, &PriceTable::defaults()).unwrap();
+        let sub = groups.iter().find(|g| g.account_id == "sub").unwrap();
+        assert_eq!(sub.tokens.output, 1_000_000, "from is inclusive, to is exclusive");
+        assert!(sub.notional_usd > 0.0);
+
+        let all = s.by_account(0, 10_000, &table, &PriceTable::defaults()).unwrap();
+        assert_eq!(
+            all.iter().find(|g| g.account_id == "sub").unwrap().tokens.output,
+            3_000_000
+        );
     }
 }

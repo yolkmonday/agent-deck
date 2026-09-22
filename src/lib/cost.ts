@@ -7,6 +7,12 @@ export const formatUsd = (n: number): string => {
   return `$${n.toFixed(2).replace(".", ",")}`;
 };
 
+/** Never show a bare dollar amount for a subscription: it is an estimate of what
+ *  the same tokens would have cost at API rates, not a bill. */
+export const NOTIONAL_HINT = "Perkiraan kalau dibayar per token. Tidak menambah tagihan.";
+
+export const formatNotional = (n: number): string => `≈ ${formatUsd(n)}`;
+
 export const formatPct = (n: number): string => `${Math.round(n)}%`;
 
 export interface DailyStack {

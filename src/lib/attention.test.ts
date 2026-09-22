@@ -28,6 +28,7 @@ const session = (over: Partial<Session> = {}): Session => ({
   ownTokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
   subagents: [],
   costUsd: 0,
+  billingMode: "payg",
   priced: true,
   startedAtMs: 0,
   updatedAtMs: 0,

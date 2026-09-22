@@ -5,6 +5,10 @@ mod providers;
 mod secrets;
 mod terminal;
 
+use collector::billing::{
+    cycle_for, days_left, format_date, local_date, parse_date_iso, start_of_day_ms, BillingAccount,
+    BillingMode, BillingTable,
+};
 use collector::indexer::{index_claude, index_codex, index_opencode, IndexReport};
 use collector::health::Thresholds;
 use collector::live::{LiveCollector, Paths};
@@ -12,7 +16,7 @@ use collector::model::{Agent, LiveSnapshot, TokenUsage};
 use collector::pricing::{PriceEntry, PriceTable};
 use collector::process::SystemProcessTable;
 use collector::savings::{read_lean_ctx, read_rtk};
-use collector::store::{ModelAgg, ProjectAgg, SpanRow, Store, TotalsAgg};
+use collector::store::{AccountAgg, ModelAgg, ProjectAgg, SpanRow, Store, TotalsAgg};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +29,7 @@ struct AppState {
     collector: Mutex<LiveCollector>,
     store: Mutex<Store>,
     pricing: Mutex<PriceTable>,
+    billing: Mutex<BillingTable>,
     indexing: AtomicBool,
     last_run_ms: Mutex<Option<i64>>,
     savings_cache: Mutex<Option<SavingsCache>>,
@@ -365,8 +370,13 @@ fn status(state: &AppState) -> Result<IndexStatus, String> {
 #[tauri::command]
 fn live_snapshot(state: State<'_, Arc<AppState>>) -> LiveSnapshot {
     let prices = state.pricing.lock().unwrap().clone();
+    let billing = state.billing.lock().unwrap().clone();
     let thresholds = thresholds(&state);
-    state.collector.lock().unwrap().snapshot(now_ms(), &prices, &thresholds)
+    state
+        .collector
+        .lock()
+        .unwrap()
+        .snapshot(now_ms(), &prices, &billing, &thresholds)
 }
 
 #[tauri::command]
@@ -530,11 +540,230 @@ fn pricing_set(
     Ok(table.entries().to_vec())
 }
 
+const RENEWAL_DAY_MAX: u32 = 28;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountPeriod {
+    account_id: String,
+    label: String,
+    mode: BillingMode,
+    from_date: String,
+    to_date: String,
+    tokens: TokenUsage,
+    spend_usd: f64,
+    notional_usd: f64,
+    committed_usd: Option<f64>,
+    credit_left_usd: Option<f64>,
+    days_left: Option<i64>,
+    expired: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BillingSummary {
+    periods: Vec<AccountPeriod>,
+    total_spend_usd: f64,
+    total_notional_usd: f64,
+    warnings: Vec<String>,
+}
+
+/// One account as the user typed it, checked before it is written. Every failure
+/// is the exact Indonesian string the dialog displays.
+pub fn validate_account(a: &BillingAccount) -> Result<(), String> {
+    if a.label.trim().is_empty() {
+        return Err("nama akun tidak boleh kosong".into());
+    }
+    if a.matches.iter().all(|m| m.trim().is_empty()) {
+        return Err("isi setidaknya satu awalan model".into());
+    }
+    match a.mode {
+        BillingMode::Subscription => {
+            let monthly = a
+                .monthly_usd
+                .ok_or_else(|| "biaya bulanan wajib diisi".to_string())?;
+            if monthly < 0.0 {
+                return Err("biaya bulanan tidak boleh negatif".into());
+            }
+            let day = a
+                .renewal_day
+                .ok_or_else(|| "tanggal perpanjangan wajib diisi".to_string())?;
+            if !(1..=RENEWAL_DAY_MAX).contains(&day) {
+                return Err(format!("tanggal perpanjangan harus 1 sampai {RENEWAL_DAY_MAX}"));
+            }
+        }
+        BillingMode::Prepaid => {
+            let credit = a
+                .credit_usd
+                .ok_or_else(|| "saldo awal wajib diisi".to_string())?;
+            if credit < 0.0 {
+                return Err("saldo awal tidak boleh negatif".into());
+            }
+            if a.started_on.as_deref().is_some_and(|d| parse_date_iso(d).is_none()) {
+                return Err("tanggal mulai tidak valid".into());
+            }
+        }
+        BillingMode::Payg => {}
+    }
+    for (field, value) in [("tanggal berakhir", &a.expires_on)] {
+        if value.as_deref().is_some_and(|d| parse_date_iso(d).is_none()) {
+            return Err(format!("{field} tidak valid"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_accounts(accounts: &[BillingAccount]) -> Result<(), String> {
+    for a in accounts {
+        validate_account(a)?;
+    }
+    Ok(())
+}
+
+fn period_for(agg: &AccountAgg, account: Option<&BillingAccount>, as_of: time::Date) -> AccountPeriod {
+    let (from, to) = match account {
+        Some(a) => cycle_for(a, as_of),
+        // The fallback group is pay-as-you-go, so it reports the calendar month.
+        None => cycle_for(
+            &BillingAccount {
+                id: String::new(),
+                label: agg.label.clone(),
+                mode: BillingMode::Payg,
+                matches: Vec::new(),
+                monthly_usd: None,
+                renewal_day: None,
+                credit_usd: None,
+                started_on: None,
+                expires_on: None,
+            },
+            as_of,
+        ),
+    };
+    let left = account.and_then(|a| days_left(a, as_of));
+    // Prepaid credit drains at API rates, so what is left is what was topped up
+    // minus what this cycle's tokens cost. It never reads below zero.
+    let credit_left = account
+        .filter(|a| a.mode == BillingMode::Prepaid)
+        .map(|a| (a.credit_usd.unwrap_or(0.0) - agg.spend_usd).max(0.0));
+    AccountPeriod {
+        account_id: agg.account_id.clone(),
+        label: agg.label.clone(),
+        mode: agg.mode,
+        from_date: format_date(from),
+        to_date: format_date(to),
+        tokens: agg.tokens.clone(),
+        spend_usd: agg.spend_usd,
+        notional_usd: agg.notional_usd,
+        committed_usd: account.and_then(|a| a.monthly_usd),
+        credit_left_usd: credit_left,
+        days_left: left,
+        expired: left.is_some_and(|d| d < 0),
+    }
+}
+
+#[tauri::command]
+fn billing_accounts(state: State<'_, Arc<AppState>>) -> Vec<BillingAccount> {
+    state.billing.lock().unwrap().accounts().to_vec()
+}
+
+#[tauri::command]
+fn billing_save(
+    accounts: Vec<BillingAccount>,
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<BillingAccount>, String> {
+    validate_accounts(&accounts)?;
+    let mut table = state.billing.lock().unwrap();
+    table.set(accounts);
+    table
+        .save(&data_dir(&app).join("billing.json"))
+        .map_err(|e| e.to_string())?;
+    Ok(table.accounts().to_vec())
+}
+
+#[tauri::command]
+fn billing_summary(
+    as_of: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<BillingSummary, String> {
+    let today = match as_of.as_deref() {
+        Some(s) => parse_date_iso(s).ok_or_else(|| "tanggal tidak valid".to_string())?,
+        None => local_date(now_ms()),
+    };
+    let table = state.billing.lock().unwrap().clone();
+    let prices = state.pricing.lock().unwrap().clone();
+
+    let mut periods = Vec::new();
+    let mut warnings = Vec::new();
+    for agg in table_accounts(&state, &table, &prices, today)? {
+        let account = table.accounts().iter().find(|a| a.id == agg.account_id);
+        let period = period_for(&agg, account, today);
+        if period.expired {
+            warnings.push(format!("{} sudah lewat tanggal", period.label));
+        } else if let (Some(left), Some(a)) = (period.days_left, account) {
+            if a.mode == BillingMode::Prepaid {
+                if let (Some(credit), Some(started)) = (
+                    a.credit_usd,
+                    a.started_on.as_deref().and_then(parse_date_iso),
+                ) {
+                    let elapsed = (today - started).whole_days().max(1);
+                    let burn = agg.spend_usd / elapsed as f64;
+                    if burn > 0.0 {
+                        let runs_out = (credit / burn).floor() as i64;
+                        if runs_out < left {
+                            warnings.push(format!("{} habis dalam {} hari", period.label, runs_out));
+                        }
+                    }
+                }
+            }
+        }
+        periods.push(period);
+    }
+
+    Ok(BillingSummary {
+        total_spend_usd: periods.iter().map(|p| p.spend_usd).sum(),
+        total_notional_usd: periods.iter().map(|p| p.notional_usd).sum(),
+        periods,
+        warnings,
+    })
+}
+
+/// A window that covers every account's own cycle: each one starts somewhere in
+/// the recent past, so a generous span in milliseconds is enough to feed them all
+/// and the per-account cycle decides what is actually counted.
+fn table_accounts(
+    state: &Arc<AppState>,
+    table: &BillingTable,
+    prices: &PriceTable,
+    as_of: time::Date,
+) -> Result<Vec<AccountAgg>, String> {
+    let earliest = table
+        .accounts()
+        .iter()
+        .map(|a| cycle_for(a, as_of).0)
+        .min()
+        .unwrap_or(as_of);
+    let latest = table
+        .accounts()
+        .iter()
+        .map(|a| cycle_for(a, as_of).1)
+        .max()
+        .unwrap_or(as_of);
+    let from_ms = start_of_day_ms(earliest);
+    // The window is inclusive of the last day's messages.
+    let to_ms = start_of_day_ms(latest) + 86_400_000;
+    state
+        .store
+        .lock()
+        .unwrap()
+        .by_account(from_ms, to_ms, table, prices)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn term_profiles() -> Vec<TermProfile> {
     TerminalRegistry::profiles()
 }
-
 #[tauri::command]
 fn term_start(
     profile_id: String,
@@ -1016,7 +1245,12 @@ fn project_suggestions(
 ) -> Result<Vec<projects::ProjectSuggestion>, String> {
     let home = home_dir();
     let prices = state.pricing.lock().unwrap().clone();
-    let live = state.collector.lock().unwrap().snapshot(now_ms(), &prices, &thresholds(&state));
+    let billing = state.billing.lock().unwrap().clone();
+    let live = state
+        .collector
+        .lock()
+        .unwrap()
+        .snapshot(now_ms(), &prices, &billing, &thresholds(&state));
     let (known, saved_paths) = {
         let store = state.store.lock().map_err(|e| e.to_string())?;
         let known = store.known_project_dirs().map_err(|e| e.to_string())?;
@@ -1338,6 +1572,112 @@ mod tests {
             Err("menit harus minimal 1".to_string())
         );
     }
+
+    fn billing_account(mode: BillingMode) -> BillingAccount {
+        BillingAccount {
+            id: "a1".into(),
+            label: "Claude Max".into(),
+            mode,
+            matches: vec!["claude-".into()],
+            monthly_usd: Some(200.0),
+            renewal_day: Some(14),
+            credit_usd: Some(20.0),
+            started_on: Some("2026-03-01".into()),
+            expires_on: None,
+        }
+    }
+
+    #[test]
+    fn billing_defaults_are_an_empty_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let loaded = BillingTable::load(&tmp.path().join("billing.json"));
+        assert!(loaded.accounts().is_empty(), "no plan is invented for the user");
+
+        let wired = serde_json::to_value(BillingTable::defaults().accounts()).unwrap();
+        assert_eq!(wired, serde_json::json!([]));
+    }
+
+    #[test]
+    fn billing_shape_matches_the_frontend_contract() {
+        let v = serde_json::to_value(billing_account(BillingMode::Subscription)).unwrap();
+        assert_eq!(v["mode"], "subscription");
+        assert_eq!(v["monthlyUsd"], 200.0);
+        assert_eq!(v["renewalDay"], 14);
+        assert_eq!(v["startedOn"], "2026-03-01");
+        assert_eq!(v["expiresOn"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn billing_rejects_an_empty_label() {
+        let mut a = billing_account(BillingMode::Subscription);
+        a.label = "   ".into();
+        assert_eq!(validate_account(&a), Err("nama akun tidak boleh kosong".into()));
+    }
+
+    #[test]
+    fn billing_rejects_an_empty_match_list() {
+        let mut a = billing_account(BillingMode::Subscription);
+        a.matches = vec!["".into(), " ".into()];
+        assert_eq!(
+            validate_account(&a),
+            Err("isi setidaknya satu awalan model".into())
+        );
+    }
+
+    #[test]
+    fn billing_rejects_an_out_of_range_renewal_day() {
+        for day in [0u32, 29, 31] {
+            let mut a = billing_account(BillingMode::Subscription);
+            a.renewal_day = Some(day);
+            assert_eq!(
+                validate_account(&a),
+                Err("tanggal perpanjangan harus 1 sampai 28".into()),
+                "day {day}"
+            );
+        }
+    }
+
+    #[test]
+    fn billing_rejects_a_negative_monthly_price() {
+        let mut a = billing_account(BillingMode::Subscription);
+        a.monthly_usd = Some(-1.0);
+        assert_eq!(validate_account(&a), Err("biaya bulanan tidak boleh negatif".into()));
+    }
+
+    #[test]
+    fn billing_rejects_a_malformed_date() {
+        let mut a = billing_account(BillingMode::Subscription);
+        a.expires_on = Some("14-03-2026".into());
+        assert_eq!(validate_account(&a), Err("tanggal berakhir tidak valid".into()));
+
+        let mut p = billing_account(BillingMode::Prepaid);
+        p.started_on = Some("kemarin".into());
+        assert_eq!(validate_account(&p), Err("tanggal mulai tidak valid".into()));
+    }
+
+    #[test]
+    fn billing_requires_the_fields_its_mode_needs() {
+        let mut sub = billing_account(BillingMode::Subscription);
+        sub.monthly_usd = None;
+        assert_eq!(validate_account(&sub), Err("biaya bulanan wajib diisi".into()));
+        sub.monthly_usd = Some(200.0);
+        sub.renewal_day = None;
+        assert_eq!(validate_account(&sub), Err("tanggal perpanjangan wajib diisi".into()));
+
+        let mut pre = billing_account(BillingMode::Prepaid);
+        pre.credit_usd = None;
+        assert_eq!(validate_account(&pre), Err("saldo awal wajib diisi".into()));
+    }
+
+    #[test]
+    fn billing_accepts_a_payg_account_with_no_extra_fields() {
+        let mut a = billing_account(BillingMode::Payg);
+        a.monthly_usd = None;
+        a.renewal_day = None;
+        a.credit_usd = None;
+        a.started_on = None;
+        assert_eq!(validate_account(&a), Ok(()));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1352,11 +1692,13 @@ pub fn run() {
             let store = Store::open(&dir.join("agent-deck.db"))
                 .expect("failed to open the history index");
             let pricing = PriceTable::load(&dir.join("pricing.json"));
+            let billing = BillingTable::load(&dir.join("billing.json"));
             let collector = LiveCollector::new(Paths::for_home(&home), Arc::new(SystemProcessTable));
             let state = Arc::new(AppState {
                 collector: Mutex::new(collector),
                 store: Mutex::new(store),
                 pricing: Mutex::new(pricing),
+                billing: Mutex::new(billing),
                 indexing: AtomicBool::new(false),
                 last_run_ms: Mutex::new(None),
                 savings_cache: Mutex::new(None),
@@ -1384,12 +1726,13 @@ pub fn run() {
                     // The price and settings locks are held only for the clone,
                     // never across the emit or the sleep below.
                     let prices = state.pricing.lock().unwrap().clone();
+                    let billing = state.billing.lock().unwrap().clone();
                     let thresholds = thresholds(&state);
                     let snap = state
                         .collector
                         .lock()
                         .unwrap()
-                        .snapshot(now_ms(), &prices, &thresholds);
+                        .snapshot(now_ms(), &prices, &billing, &thresholds);
                     if last.as_ref().is_none_or(|l| !l.same_content(&snap)) {
                         let _ = handle.emit("live://snapshot", &snap);
                         last = Some(snap);
@@ -1411,6 +1754,9 @@ pub fn run() {
             savings_summary,
             pricing_get,
             pricing_set,
+            billing_accounts,
+            billing_save,
+            billing_summary,
             term_profiles,
             term_start,
             term_list,
