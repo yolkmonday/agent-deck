@@ -12,7 +12,7 @@ use collector::pricing::{PriceEntry, PriceTable};
 use collector::process::SystemProcessTable;
 use collector::savings::{read_lean_ctx, read_rtk};
 use collector::store::{ModelAgg, ProjectAgg, SpanRow, Store, TotalsAgg};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -779,6 +779,82 @@ fn config_restore(path: String, state: State<'_, Arc<AppState>>) -> Result<(), S
     config::restore(&backup, &target).map_err(|e| e.to_string())
 }
 
+pub const ATTENTION_MODES: [&str; 3] = ["off", "notify", "auto"];
+pub const ATTENTION_MODE_KEY: &str = "attention_mode";
+pub const NOTIFY_SOUND_KEY: &str = "notify_sound";
+const SETTING_TRUE: &str = "1";
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct Settings {
+    attention_mode: String,
+    notify_sound: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            attention_mode: "notify".into(),
+            notify_sound: false,
+        }
+    }
+}
+
+/// An unknown value already in the table is a downgrade, not an error: the user
+/// gets the conservative default instead of a dashboard that refuses to start.
+fn settings_read(store: &Store) -> Result<Settings, String> {
+    let mode = match store
+        .setting(ATTENTION_MODE_KEY)
+        .map_err(|e| e.to_string())?
+        .as_deref()
+    {
+        Some(v) if ATTENTION_MODES.contains(&v) => v.to_string(),
+        _ => Settings::default().attention_mode,
+    };
+    let notify_sound = store
+        .setting(NOTIFY_SOUND_KEY)
+        .map_err(|e| e.to_string())?
+        .map(|v| v == SETTING_TRUE)
+        .unwrap_or(false);
+    Ok(Settings {
+        attention_mode: mode,
+        notify_sound,
+    })
+}
+
+fn settings_write(store: &mut Store, settings: &Settings) -> Result<Settings, String> {
+    if !ATTENTION_MODES.contains(&settings.attention_mode.as_str()) {
+        return Err("mode tidak dikenal".into());
+    }
+    store
+        .set_setting(ATTENTION_MODE_KEY, &settings.attention_mode)
+        .map_err(|e| e.to_string())?;
+    store
+        .set_setting(
+            NOTIFY_SOUND_KEY,
+            if settings.notify_sound { SETTING_TRUE } else { "0" },
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(settings.clone())
+}
+
+#[tauri::command]
+fn settings_get(state: State<'_, Arc<AppState>>) -> Result<Settings, String> {
+    settings_read(&state.store.lock().unwrap())
+}
+
+#[tauri::command]
+fn settings_set(settings: Settings, state: State<'_, Arc<AppState>>) -> Result<Settings, String> {
+    settings_write(&mut state.store.lock().unwrap(), &settings)
+}
+
+/// The frontend asks this before notifying, so a notification never lands on a
+/// window the user is already looking at.
+#[tauri::command]
+fn window_focused(window: tauri::Window) -> bool {
+    window.is_focused().unwrap_or(false)
+}
+
 /// The six project commands, all of them `Result<T, String>` so a validation
 /// failure travels to the UI as the exact Indonesian string it must display.
 
@@ -1122,12 +1198,66 @@ mod tests {
         assert!(!wire.contains("--untracked-files"));
         assert_eq!(s.top_commands[0].command, "git status");
     }
+
+    fn settings_store() -> (tempfile::TempDir, Store) {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        (tmp, store)
+    }
+
+    #[test]
+    fn settings_default_when_empty() {
+        let (_tmp, store) = settings_store();
+        let s = settings_read(&store).unwrap();
+        assert_eq!(s.attention_mode, "notify");
+        assert!(!s.notify_sound);
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["attentionMode"], "notify");
+        assert_eq!(v["notifySound"], false);
+    }
+
+    #[test]
+    fn settings_round_trip_through_commands() {
+        let (_tmp, mut store) = settings_store();
+        let input = Settings {
+            attention_mode: "auto".into(),
+            notify_sound: true,
+        };
+        let saved = settings_write(&mut store, &input).unwrap();
+        assert_eq!(saved, input);
+        assert_eq!(settings_read(&store).unwrap(), input);
+    }
+
+    #[test]
+    fn settings_reject_unknown_mode() {
+        let (_tmp, mut store) = settings_store();
+        let bad = Settings {
+            attention_mode: "turbo".into(),
+            notify_sound: true,
+        };
+        assert_eq!(
+            settings_write(&mut store, &bad),
+            Err("mode tidak dikenal".to_string())
+        );
+        assert_eq!(settings_read(&store).unwrap().attention_mode, "notify");
+        assert_eq!(store.setting("attention_mode").unwrap(), None);
+    }
+
+    #[test]
+    fn settings_unknown_stored_value_falls_back() {
+        let (_tmp, mut store) = settings_store();
+        store.set_setting("attention_mode", "garbage").unwrap();
+        let s = settings_read(&store).unwrap();
+        assert_eq!(s.attention_mode, "notify");
+        assert!(!s.notify_sound);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let home = std::env::var("HOME").unwrap_or_default();
             let dir = data_dir(&app.handle().clone());
@@ -1208,7 +1338,10 @@ pub fn run() {
             project_update,
             project_delete,
             project_touch,
-            project_suggestions
+            project_suggestions,
+            settings_get,
+            settings_set,
+            window_focused
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

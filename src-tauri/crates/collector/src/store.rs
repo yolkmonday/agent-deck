@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS project (
   sort_order INTEGER NOT NULL DEFAULT 0,
   last_used_ms INTEGER
 );
+CREATE TABLE IF NOT EXISTS setting (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -520,6 +524,30 @@ impl Store {
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM setting WHERE key = ?1", [key], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?)
+    }
+
+    pub fn set_setting(&mut self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO setting (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn settings_all(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare("SELECT key, value FROM setting")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
 }
 
 #[cfg(test)]
@@ -882,5 +910,21 @@ mod tests {
             dirs,
             vec![("busy".to_string(), 2), ("quiet".to_string(), 1)]
         );
+    }
+
+    #[test]
+    fn setting_round_trips_and_upserts() {
+        let (_tmp, mut s) = open_store();
+        s.set_setting("a", "1").unwrap();
+        assert_eq!(s.setting("a").unwrap(), Some("1".to_string()));
+        s.set_setting("a", "2").unwrap();
+        assert_eq!(s.setting("a").unwrap(), Some("2".to_string()));
+        assert_eq!(s.settings_all().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn missing_setting_is_none() {
+        let (_tmp, s) = open_store();
+        assert_eq!(s.setting("nope").unwrap(), None);
     }
 }
