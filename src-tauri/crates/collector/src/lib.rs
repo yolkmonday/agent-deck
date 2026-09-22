@@ -8,4 +8,5 @@ pub mod pricing;
 pub mod process;
 pub mod savings;
 pub mod store;
+pub mod subagent;
 pub mod transcript;
