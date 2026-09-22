@@ -481,6 +481,64 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
     report
 }
 
+/// Tool-call parts newer than `since`, as spans. `detail` is deliberately never
+/// filled: an opencode tool part carries its command text under `state.input`,
+/// and that must not reach the index.
+fn upsert_opencode_spans(
+    store: &mut Store,
+    conn: &rusqlite::Connection,
+    since: i64,
+    home: &str,
+) -> anyhow::Result<usize> {
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.time_created, p.data, s.directory, s.id \
+         FROM part p JOIN session s ON s.id = p.session_id \
+         WHERE json_extract(p.data, '$.type') = 'tool' AND p.time_created > ?1 \
+         ORDER BY p.time_created ASC",
+    )?;
+    let rows = stmt.query_map([since], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, String>(4)?,
+        ))
+    })?;
+
+    let mut spans = Vec::new();
+    for (id, created, data, directory, session_id) in rows.flatten() {
+        let Ok(v) = serde_json::from_str::<Value>(&data) else { continue };
+        let state = v.get("state").unwrap_or(&Value::Null);
+        let tool = v.get("tool").and_then(Value::as_str).unwrap_or("tool");
+        let time = state.get("time").unwrap_or(&Value::Null);
+        let start_ms = time
+            .get("start")
+            .and_then(Value::as_i64)
+            .unwrap_or(created);
+        let end_ms = time.get("end").and_then(Value::as_i64);
+        let status = match state.get("status").and_then(Value::as_str) {
+            Some("completed") => "ok",
+            Some("error") => "error",
+            _ => "running",
+        };
+        spans.push(SpanRow {
+            id: format!("opencode:{id}"),
+            agent: Agent::Opencode,
+            session_id,
+            project: project_name(&directory, home),
+            model: None,
+            tool: tool.to_string(),
+            detail: None,
+            start_ms,
+            end_ms,
+            status: status.to_string(),
+            tokens: None,
+        });
+    }
+    store.upsert_spans(&spans)
+}
+
 /// Walks the opencode SQLite DB read-only and indexes assistant messages.
 pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
     let mut report = IndexReport::default();
@@ -563,6 +621,10 @@ pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
     match store.upsert_messages(&out) {
         Ok(n) => report.messages_upserted += n,
         Err(e) => report.errors.push(format!("upsert failed: {e}")),
+    }
+    match upsert_opencode_spans(store, &conn, since, home) {
+        Ok(n) => report.spans_upserted += n,
+        Err(e) => report.errors.push(format!("span upsert failed: {e}")),
     }
     if let Err(e) = store.set_file_progress(&FileProgress {
         path: key,
@@ -932,7 +994,8 @@ mod tests {
         let c = rusqlite::Connection::open(&path).unwrap();
         c.execute_batch(
             "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER);
-             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);",
+             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);",
         )
         .unwrap();
         c.execute(
@@ -941,6 +1004,32 @@ mod tests {
         )
         .unwrap();
         path
+    }
+
+    /// A `part` row holding a tool call. `time` is spliced into `state.time`, so a
+    /// test can pass `None` to omit it entirely and exercise the fallback.
+    fn insert_tool_part(
+        db: &Path,
+        id: &str,
+        created: i64,
+        tool: &str,
+        status: &str,
+        time: Option<(i64, Option<i64>)>,
+    ) {
+        let c = rusqlite::Connection::open(db).unwrap();
+        let time_json = match time {
+            Some((start, Some(end))) => format!(r#","time":{{"start":{start},"end":{end}}}"#),
+            Some((start, None)) => format!(r#","time":{{"start":{start}}}"#),
+            None => String::new(),
+        };
+        let data = format!(
+            r#"{{"type":"tool","tool":"{tool}","state":{{"status":"{status}","input":{{"command":"rm -rf /secret"}}{time_json}}}}}"#
+        );
+        c.execute(
+            "INSERT INTO part VALUES (?1,'msg_1','ses_1',?2,?2,?3)",
+            rusqlite::params![id, created, data],
+        )
+        .unwrap();
     }
 
     fn insert_message(db: &Path, id: &str, ts: i64, role: &str, input: u64, output: u64) {
@@ -953,6 +1042,64 @@ mod tests {
             rusqlite::params![id, ts, data],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn opencode_spans_map_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_tool_part(&db, "prt_ok", 100, "bash", "completed", Some((110, Some(120))));
+        insert_tool_part(&db, "prt_err", 200, "bash", "error", Some((210, Some(220))));
+        insert_tool_part(&db, "prt_run", 300, "bash", "running", Some((310, None)));
+
+        let mut s = store_at(tmp.path());
+        let r = index_opencode(&mut s, &db, home());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+
+        let spans = s.spans(0, i64::MAX).unwrap();
+        assert_eq!(spans.len(), 3);
+        let get = |id: &str| spans.iter().find(|x| x.id == id).unwrap();
+        assert_eq!(get("opencode:prt_ok").status, "ok");
+        assert_eq!(get("opencode:prt_err").status, "error");
+        assert_eq!(get("opencode:prt_run").status, "running");
+        assert_eq!(get("opencode:prt_ok").tool, "bash");
+        assert_eq!(get("opencode:prt_ok").agent, Agent::Opencode);
+        assert_eq!(get("opencode:prt_ok").project, "kirimi");
+    }
+
+    #[test]
+    fn opencode_span_uses_state_times_then_falls_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_tool_part(&db, "prt_times", 100, "bash", "completed", Some((110, Some(120))));
+        insert_tool_part(&db, "prt_fallback", 400, "bash", "running", None);
+
+        let mut s = store_at(tmp.path());
+        index_opencode(&mut s, &db, home());
+        let spans = s.spans(0, i64::MAX).unwrap();
+        let get = |id: &str| spans.iter().find(|x| x.id == id).unwrap();
+
+        let timed = get("opencode:prt_times");
+        assert_eq!(timed.start_ms, 110);
+        assert_eq!(timed.end_ms, Some(120));
+
+        let fallback = get("opencode:prt_fallback");
+        assert_eq!(fallback.start_ms, 400, "must fall back to part.time_created");
+        assert_eq!(fallback.end_ms, None);
+    }
+
+    #[test]
+    fn opencode_spans_store_no_command_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_tool_part(&db, "prt_secret", 100, "bash", "completed", Some((110, Some(120))));
+
+        let mut s = store_at(tmp.path());
+        index_opencode(&mut s, &db, home());
+        let spans = s.spans(0, i64::MAX).unwrap();
+        let span = spans.iter().find(|x| x.id == "opencode:prt_secret").unwrap();
+        assert_eq!(span.detail, None, "opencode must never persist command text");
+        assert_eq!(span.tokens, None);
     }
 
     #[test]
