@@ -83,6 +83,7 @@ export const SessionCard = ({
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [subagentsOpen, setSubagentsOpen] = useState(false);
+  const [confirmStart, setConfirmStart] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -103,15 +104,27 @@ export const SessionCard = ({
     setNote("Sesi ini jalan di terminal lain. Buka di sana.");
   };
 
+  // Not `window.confirm`: Tauri v2 routes it to the dialog plugin, which needs a
+  // permission we do not grant, and it would block the webview while the live
+  // loop keeps running behind it. A two-step button says the same thing.
   const startNew = () => {
-    const confirm = window.confirm(`Mulai ${s.agent} baru di ${s.cwd}? Ini proses baru, bukan lanjutan sesi ini.`);
-    if (!confirm) return;
+    if (!confirmStart) {
+      setConfirmStart(true);
+      setNote(`Mulai ${s.agent} baru di ${s.cwd}? Ini proses baru, bukan lanjutan sesi ini.`);
+      return;
+    }
+    setConfirmStart(false);
     setBusy(true);
     setNote(null);
     void startSession(s.agent, s.cwd)
       .then(() => onOpenTerminal())
       .catch(() => setNote("Gagal memulai sesi. Cek notifikasi di halaman Terminal."))
       .finally(() => setBusy(false));
+  };
+
+  const cancelStart = () => {
+    setConfirmStart(false);
+    setNote(null);
   };
   return (
     <div
@@ -250,16 +263,27 @@ export const SessionCard = ({
               type="button"
               disabled={busy}
               onClick={startNew}
-              className={`shrink-0 rounded-md border border-border px-3 py-1.25 text-[12px] font-semibold ${
-                busy ? "cursor-default text-fg-3" : "cursor-pointer text-fg-2"
+              className={`shrink-0 rounded-md border px-3 py-1.25 text-[12px] font-semibold ${
+                confirmStart ? "border-waiting text-waiting" : "border-border"
+              } ${busy ? "cursor-default text-fg-3" : "cursor-pointer"} ${
+                !confirmStart && !busy ? "text-fg-2" : ""
               }`}
             >
-              Terminal
+              {confirmStart ? "Yakin?" : "Terminal"}
             </button>
           )}
         </div>
       </div>
-      {note && <span className="text-[11.5px] text-fg-3">{note}</span>}
+      {note && (
+        <span className="flex items-center gap-2 text-[11.5px] text-fg-3">
+          <span className="min-w-0 flex-1">{note}</span>
+          {confirmStart && (
+            <button type="button" onClick={cancelStart} className="shrink-0 cursor-pointer underline">
+              Batal
+            </button>
+          )}
+        </span>
+      )}
     </div>
   );
 };
