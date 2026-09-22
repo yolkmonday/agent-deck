@@ -118,6 +118,60 @@ fn local_date_from_rfc3339(ts: &str) -> String {
     date
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LeanCtxStats {
+    pub saved_tokens: i64,
+    pub total_tokens: i64,
+    pub entries: i64,
+    pub daily: Vec<(String, i64)>,
+}
+
+/// lean-ctx's `stats.json` is written by another tool, so every key is read
+/// defensively: a missing or renamed key contributes 0 instead of failing the
+/// whole read. Only unparseable JSON is an error.
+pub fn read_lean_ctx(stats_json: &Path, since_ms: i64) -> Result<LeanCtxStats> {
+    let body = std::fs::read_to_string(stats_json)
+        .with_context(|| format!("read lean-ctx stats at {}", stats_json.display()))?;
+    let root: serde_json::Value =
+        serde_json::from_str(&body).context("parse lean-ctx stats.json")?;
+
+    let total_tokens = num(&root, "total_input_tokens");
+    let output_tokens = num(&root, "total_output_tokens");
+    let since_date = local_date_from_ms(since_ms);
+
+    let mut daily = Vec::new();
+    if let Some(items) = root.get("daily").and_then(|v| v.as_array()) {
+        for item in items {
+            let date = item.get("date").and_then(|v| v.as_str()).unwrap_or_default();
+            if date.is_empty() || date < since_date.as_str() {
+                continue;
+            }
+            let saved = (num(item, "input_tokens") - num(item, "output_tokens")).max(0);
+            daily.push((date.to_string(), saved));
+        }
+    }
+    daily.sort_by(|a, b| a.0.cmp(&b.0));
+
+    Ok(LeanCtxStats {
+        saved_tokens: (total_tokens - output_tokens).max(0),
+        total_tokens,
+        entries: num(&root, "total_commands"),
+        daily,
+    })
+}
+
+fn num(v: &serde_json::Value, key: &str) -> i64 {
+    v.get(key).and_then(|x| x.as_i64()).unwrap_or(0)
+}
+
+/// The date part of the local calendar day containing `ms`.
+fn local_date_from_ms(ms: i64) -> String {
+    if ms <= 0 {
+        return String::new();
+    }
+    local_date_from_rfc3339(&rfc3339_from_ms(ms))
+}
+
 const KNOWN_TOOLS: [&str; 8] = [
     "git", "cargo", "bun", "npm", "go", "docker", "kubectl", "pnpm",
 ];
@@ -263,5 +317,70 @@ CREATE TABLE commands (
     fn read_rtk_missing_db_is_an_error_not_a_panic() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(read_rtk(&tmp.path().join("nope.db"), 0).is_err());
+    }
+
+    fn lean_ctx_file(body: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("stats.json");
+        std::fs::write(&path, body).unwrap();
+        (tmp, path)
+    }
+
+    #[test]
+    fn lean_ctx_reads_totals_and_daily() {
+        let (_tmp, path) = lean_ctx_file(
+            r#"{
+  "total_commands": 350,
+  "total_input_tokens": 255826,
+  "total_output_tokens": 102159,
+  "first_use": "2026-06-01T00:00:00Z",
+  "last_use": "2026-09-22T00:00:00Z",
+  "commands": {"git push": {"count": 2, "input_tokens": 30, "output_tokens": 10}},
+  "daily": [
+    {"date": "2026-03-10", "commands": 5, "input_tokens": 100, "output_tokens": 40},
+    {"date": "2026-03-11", "commands": 3, "input_tokens": 50, "output_tokens": 20}
+  ]
+}"#,
+        );
+        let s = read_lean_ctx(&path, 0).unwrap();
+        assert_eq!(s.entries, 350);
+        assert_eq!(s.total_tokens, 255826);
+        assert_eq!(s.saved_tokens, 153667);
+        assert_eq!(s.daily.len(), 2);
+        assert_eq!(s.daily[0], ("2026-03-10".to_string(), 60));
+        assert_eq!(s.daily[1], ("2026-03-11".to_string(), 30));
+    }
+
+    #[test]
+    fn lean_ctx_respects_since_ms() {
+        let (_tmp, path) = lean_ctx_file(
+            r#"{
+  "total_commands": 2,
+  "total_input_tokens": 200,
+  "daily": [
+    {"date": "2020-01-01", "commands": 1, "input_tokens": 100, "output_tokens": 40},
+    {"date": "2999-01-01", "commands": 1, "input_tokens": 100, "output_tokens": 10}
+  ]
+}"#,
+        );
+        let s = read_lean_ctx(&path, 1_700_000_000_000).unwrap();
+        assert_eq!(s.daily.len(), 1);
+        assert_eq!(s.daily[0], ("2999-01-01".to_string(), 90));
+    }
+
+    #[test]
+    fn lean_ctx_missing_keys_default_to_zero() {
+        let (_tmp, path) = lean_ctx_file("{}");
+        let s = read_lean_ctx(&path, 0).unwrap();
+        assert_eq!(s.entries, 0);
+        assert_eq!(s.saved_tokens, 0);
+        assert_eq!(s.total_tokens, 0);
+        assert!(s.daily.is_empty());
+    }
+
+    #[test]
+    fn lean_ctx_invalid_json_is_an_error() {
+        let (_tmp, path) = lean_ctx_file("not json");
+        assert!(read_lean_ctx(&path, 0).is_err());
     }
 }
