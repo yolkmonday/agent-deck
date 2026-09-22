@@ -3,6 +3,7 @@ use collector::live::{LiveCollector, Paths};
 use collector::model::{Agent, LiveSnapshot, TokenUsage};
 use collector::pricing::{PriceEntry, PriceTable};
 use collector::process::SystemProcessTable;
+use collector::savings::{read_lean_ctx, read_rtk};
 use collector::store::{ModelAgg, ProjectAgg, SpanRow, Store, TotalsAgg};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ struct AppState {
     pricing: Mutex<PriceTable>,
     indexing: AtomicBool,
     last_run_ms: Mutex<Option<i64>>,
+    savings_cache: Mutex<Option<SavingsCache>>,
 }
 
 fn now_ms() -> i64 {
@@ -161,6 +163,175 @@ fn timeline_spans(
 
     lanes.sort_by_key(|l| l.spans.first().map(|s| s.start_ms).unwrap_or(0));
     Ok(lanes)
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SavingsSource {
+    available: bool,
+    saved_tokens: i64,
+    total_tokens: i64,
+    savings_pct: f64,
+    entries: i64,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SavingsDay {
+    date: String,
+    rtk_saved: i64,
+    lean_ctx_saved: i64,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SavingsCommand {
+    command: String,
+    saved_tokens: i64,
+    savings_pct: f64,
+    runs: i64,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SavingsSummary {
+    rtk: SavingsSource,
+    lean_ctx: SavingsSource,
+    daily: Vec<SavingsDay>,
+    top_commands: Vec<SavingsCommand>,
+    warnings: Vec<String>,
+}
+
+struct SavingsCache {
+    key: i64,
+    at_ms: i64,
+    summary: SavingsSummary,
+}
+
+const SAVINGS_CACHE_MS: i64 = 30_000;
+const TOP_COMMAND_LIMIT: usize = 10;
+
+fn savings_pct(saved: i64, total: i64) -> f64 {
+    if total <= 0 {
+        0.0
+    } else {
+        saved as f64 / total as f64 * 100.0
+    }
+}
+
+fn missing_source() -> SavingsSource {
+    SavingsSource {
+        available: false,
+        saved_tokens: 0,
+        total_tokens: 0,
+        savings_pct: 0.0,
+        entries: 0,
+    }
+}
+
+/// Merges both readers into the wire view. A source that cannot be read is a
+/// warning, never an error: the screen still shows whatever the other one has.
+fn savings_summary_for(days: i64, home: &str) -> SavingsSummary {
+    let since = since_ms(days);
+    let mut warnings = Vec::new();
+
+    let rtk_path = PathBuf::from(home)
+        .join("Library/Application Support/rtk/history.db");
+    let (rtk, rtk_daily, top_commands): (SavingsSource, Vec<(String, i64)>, Vec<SavingsCommand>) =
+        match read_rtk(&rtk_path, since) {
+        Ok(s) => {
+            let source = SavingsSource {
+                available: true,
+                saved_tokens: s.saved_tokens,
+                total_tokens: s.total_tokens,
+                savings_pct: savings_pct(s.saved_tokens, s.total_tokens),
+                entries: s.entries,
+            };
+            let top = s
+                .top_commands
+                .into_iter()
+                .take(TOP_COMMAND_LIMIT)
+                .map(|(command, saved_tokens, savings_pct, runs)| SavingsCommand {
+                    command,
+                    saved_tokens,
+                    savings_pct,
+                    runs,
+                })
+                .collect();
+            (source, s.daily, top)
+        }
+        Err(e) => {
+            warnings.push(format!("rtk: {e}"));
+            (missing_source(), Vec::new(), Vec::new())
+        }
+    };
+
+    let lean_path = PathBuf::from(home).join(".lean-ctx/stats.json");
+    let (lean_ctx, lean_daily): (SavingsSource, Vec<(String, i64)>) =
+        match read_lean_ctx(&lean_path, since) {
+            Ok(s) => (
+                SavingsSource {
+                    available: true,
+                    saved_tokens: s.saved_tokens,
+                    total_tokens: s.total_tokens,
+                    savings_pct: savings_pct(s.saved_tokens, s.total_tokens),
+                    entries: s.entries,
+                },
+                s.daily,
+            ),
+            Err(e) => {
+                warnings.push(format!("lean-ctx: {e}"));
+                (missing_source(), Vec::new())
+            }
+        };
+
+    let mut by_day: std::collections::BTreeMap<String, SavingsDay> = Default::default();
+    for (date, saved) in rtk_daily {
+        by_day.entry(date.clone()).or_insert_with(|| SavingsDay {
+            date,
+            rtk_saved: 0,
+            lean_ctx_saved: 0,
+        }).rtk_saved += saved;
+    }
+    for (date, saved) in lean_daily {
+        by_day.entry(date.clone()).or_insert_with(|| SavingsDay {
+            date,
+            rtk_saved: 0,
+            lean_ctx_saved: 0,
+        }).lean_ctx_saved += saved;
+    }
+
+    SavingsSummary {
+        rtk,
+        lean_ctx,
+        daily: by_day.into_values().collect(),
+        top_commands,
+        warnings,
+    }
+}
+
+#[tauri::command]
+fn savings_summary(days: i64, state: State<'_, Arc<AppState>>) -> Result<SavingsSummary, String> {
+    let now = now_ms();
+    {
+        let cache = state.savings_cache.lock().map_err(|e| e.to_string())?;
+        if let Some(c) = cache.as_ref() {
+            if c.key == days && now - c.at_ms < SAVINGS_CACHE_MS {
+                return Ok(c.summary.clone());
+            }
+        }
+    }
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    let summary = savings_summary_for(days, &home);
+    if let Ok(mut cache) = state.savings_cache.lock() {
+        *cache = Some(SavingsCache {
+            key: days,
+            at_ms: now,
+            summary: summary.clone(),
+        });
+    }
+    Ok(summary)
 }
 
 fn since_ms(days: i64) -> i64 {
@@ -411,6 +582,154 @@ mod tests {
             assert_eq!(s.status, st);
         }
     }
+
+    #[test]
+    fn savings_wire_shape_matches_the_frontend_contract() {
+        let summary = SavingsSummary {
+            rtk: SavingsSource {
+                available: true,
+                saved_tokens: 448714,
+                total_tokens: 1939572,
+                savings_pct: 23.13,
+                entries: 2201,
+            },
+            lean_ctx: missing_source(),
+            daily: vec![SavingsDay {
+                date: "2026-03-10".into(),
+                rtk_saved: 120,
+                lean_ctx_saved: 0,
+            }],
+            top_commands: vec![SavingsCommand {
+                command: "git status".into(),
+                saved_tokens: 120,
+                savings_pct: 80.0,
+                runs: 2,
+            }],
+            warnings: vec!["lean-ctx: missing".into()],
+        };
+        let v = serde_json::to_value(&summary).unwrap();
+        assert_eq!(v["rtk"]["savedTokens"], 448714);
+        assert_eq!(v["rtk"]["totalTokens"], 1939572);
+        assert_eq!(v["rtk"]["savingsPct"], 23.13);
+        assert_eq!(v["rtk"]["entries"], 2201);
+        assert_eq!(v["leanCtx"]["available"], false);
+        assert_eq!(v["leanCtx"]["savedTokens"], 0);
+        assert_eq!(v["daily"][0]["rtkSaved"], 120);
+        assert_eq!(v["daily"][0]["leanCtxSaved"], 0);
+        assert_eq!(v["topCommands"][0]["command"], "git status");
+        assert_eq!(v["topCommands"][0]["savedTokens"], 120);
+        assert_eq!(v["topCommands"][0]["savingsPct"], 80.0);
+        assert_eq!(v["topCommands"][0]["runs"], 2);
+        assert_eq!(v["warnings"][0], "lean-ctx: missing");
+    }
+
+    #[test]
+    fn savings_pct_is_zero_when_total_is_zero() {
+        assert_eq!(savings_pct(0, 0), 0.0);
+        assert_eq!(savings_pct(5, 0), 0.0);
+        assert_eq!(savings_pct(50, 200), 25.0);
+    }
+
+    #[test]
+    fn savings_summary_for_missing_sources_warns_and_returns_zeros() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().to_str().unwrap();
+        let s = savings_summary_for(0, home);
+        assert!(!s.rtk.available);
+        assert!(!s.lean_ctx.available);
+        assert_eq!(s.rtk.saved_tokens, 0);
+        assert_eq!(s.daily.len(), 0);
+        assert_eq!(s.top_commands.len(), 0);
+        assert_eq!(s.warnings.len(), 2);
+        assert!(s.warnings.iter().any(|w| w.starts_with("rtk: ")));
+        assert!(s.warnings.iter().any(|w| w.starts_with("lean-ctx: ")));
+    }
+
+    #[test]
+    fn savings_summary_merges_both_sources_by_date() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().to_path_buf();
+
+        let rtk_dir = home.join("Library/Application Support/rtk");
+        std::fs::create_dir_all(&rtk_dir).unwrap();
+        let conn = rusqlite::Connection::open(rtk_dir.join("history.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE commands (id INTEGER PRIMARY KEY, timestamp TEXT NOT NULL, \
+             original_cmd TEXT NOT NULL, rtk_cmd TEXT NOT NULL, input_tokens INTEGER NOT NULL, \
+             output_tokens INTEGER NOT NULL, saved_tokens INTEGER NOT NULL, savings_pct REAL NOT NULL);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, input_tokens, output_tokens, saved_tokens, savings_pct) \
+             VALUES ('2026-03-10T10:00:00.000000+00:00', 'git status -s', 'git status -s', 100, 20, 80, 80.0)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        std::fs::create_dir_all(home.join(".lean-ctx")).unwrap();
+        std::fs::write(
+            home.join(".lean-ctx/stats.json"),
+            r#"{"total_commands": 3, "total_input_tokens": 500, "total_output_tokens": 200,
+                "daily": [{"date": "2026-03-10", "commands": 3, "input_tokens": 300, "output_tokens": 100},
+                          {"date": "2026-03-12", "commands": 1, "input_tokens": 200, "output_tokens": 100}]}"#,
+        )
+        .unwrap();
+
+        let s = savings_summary_for(0, home.to_str().unwrap());
+        assert!(s.rtk.available);
+        assert!(s.lean_ctx.available);
+        assert!(s.warnings.is_empty());
+        assert_eq!(s.rtk.saved_tokens, 80);
+        assert_eq!(s.rtk.total_tokens, 100);
+        assert_eq!(s.rtk.savings_pct, 80.0);
+        assert_eq!(s.lean_ctx.saved_tokens, 300);
+        assert_eq!(s.lean_ctx.total_tokens, 500);
+        assert_eq!(s.lean_ctx.savings_pct, 60.0);
+        assert_eq!(s.lean_ctx.entries, 3);
+
+        assert_eq!(s.daily.len(), 2);
+        assert_eq!(s.daily[0].date, "2026-03-10");
+        assert_eq!(s.daily[0].rtk_saved, 80);
+        assert_eq!(s.daily[0].lean_ctx_saved, 200);
+        assert_eq!(s.daily[1].date, "2026-03-12");
+        assert_eq!(s.daily[1].rtk_saved, 0);
+        assert_eq!(s.daily[1].lean_ctx_saved, 100);
+
+        assert_eq!(s.top_commands.len(), 1);
+        assert_eq!(s.top_commands[0].command, "git status");
+        assert_eq!(s.top_commands[0].runs, 1);
+    }
+
+    #[test]
+    fn savings_command_text_never_leaves_the_raw_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().to_path_buf();
+        let rtk_dir = home.join("Library/Application Support/rtk");
+        std::fs::create_dir_all(&rtk_dir).unwrap();
+        let conn = rusqlite::Connection::open(rtk_dir.join("history.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE commands (id INTEGER PRIMARY KEY, timestamp TEXT NOT NULL, \
+             original_cmd TEXT NOT NULL, rtk_cmd TEXT NOT NULL, input_tokens INTEGER NOT NULL, \
+             output_tokens INTEGER NOT NULL, saved_tokens INTEGER NOT NULL, savings_pct REAL NOT NULL);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, input_tokens, output_tokens, saved_tokens, savings_pct) \
+             VALUES ('2026-03-10T10:00:00.000000+00:00', \
+                     'git status --short --untracked-files=all /Users/yolk/secret-path', \
+                     'rtk git status', 100, 20, 80, 80.0)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let s = savings_summary_for(0, home.to_str().unwrap());
+        let wire = serde_json::to_string(&s).unwrap();
+        assert!(!wire.contains("secret-path"));
+        assert!(!wire.contains("--untracked-files"));
+        assert_eq!(s.top_commands[0].command, "git status");
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -430,6 +749,7 @@ pub fn run() {
                 pricing: Mutex::new(pricing),
                 indexing: AtomicBool::new(false),
                 last_run_ms: Mutex::new(None),
+                savings_cache: Mutex::new(None),
             });
             app.manage(state.clone());
 
@@ -469,6 +789,7 @@ pub fn run() {
             history_by_project,
             history_totals,
             timeline_spans,
+            savings_summary,
             pricing_get,
             pricing_set
         ])
