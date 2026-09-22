@@ -11,4 +11,5 @@ pub mod repo;
 pub mod savings;
 pub mod store;
 pub mod subagent;
+pub mod tail;
 pub mod transcript;
