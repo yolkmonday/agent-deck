@@ -173,8 +173,17 @@ impl Store {
         Ok(())
     }
 
-    pub fn counts(&self) -> Result<(i64, i64)> {
-        let files = self.conn.query_row("SELECT COUNT(*) FROM indexed_file", [], |r| r.get(0))?;
+    /// Drops every row for a session. Used when a file shrank or was rewritten,
+    /// so the index does not keep usage for records the file no longer contains.
+    pub fn delete_session(&mut self, agent: Agent, session_id: &str) -> Result<usize> {
+        let n = self.conn.execute(
+            "DELETE FROM message WHERE agent = ?1 AND session_id = ?2",
+            rusqlite::params![agent_str(agent), session_id],
+        )?;
+        Ok(n)
+    }
+
+    pub fn counts(&self) -> Result<(i64, i64)> {        let files = self.conn.query_row("SELECT COUNT(*) FROM indexed_file", [], |r| r.get(0))?;
         let messages = self.conn.query_row("SELECT COUNT(*) FROM message", [], |r| r.get(0))?;
         Ok((files, messages))
     }

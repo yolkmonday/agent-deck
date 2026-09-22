@@ -1,0 +1,611 @@
+use crate::model::{Agent, TokenUsage};
+use crate::store::{FileProgress, MessageRow, Store};
+use crate::transcript::encode_cwd;
+use serde_json::Value;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+
+const OBSERVER_MARKER: &str = "/.claude-mem/observer-sessions";
+const READ_CHUNK: u64 = 16 * 1024 * 1024;
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct IndexReport {
+    pub files_scanned: usize,
+    pub files_skipped: usize,
+    pub messages_upserted: usize,
+    pub errors: Vec<String>,
+}
+
+pub fn parse_iso_ms(s: &str) -> Option<i64> {
+    let dt = time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()?;
+    i64::try_from(dt.unix_timestamp_nanos() / 1_000_000).ok()
+}
+
+fn file_meta(path: &Path) -> Option<(i64, i64)> {
+    let m = std::fs::metadata(path).ok()?;
+    let modified = m.modified().ok()?;
+    let ms = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    Some((ms, m.len() as i64))
+}
+
+fn read_new_lines(path: &Path, progress: Option<&FileProgress>) -> Option<(Vec<String>, i64, i64)> {
+    let (mtime_ms, size) = file_meta(path)?;
+    let start = match progress {
+        Some(p) if size >= p.size => p.offset.max(0) as u64,
+        _ => 0,
+    };
+    let mut file = File::open(path).ok()?;
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    let mut read_size = READ_CHUNK;
+    let complete = loop {
+        let mut chunk = Vec::new();
+        (&mut file).take(read_size).read_to_end(&mut chunk).ok()?;
+        buf.extend_from_slice(&chunk);
+        if let Some(i) = buf.iter().rposition(|b| *b == b'\n') {
+            break i + 1;
+        }
+        if (chunk.len() as u64) < read_size {
+            break buf.len();
+        }
+        read_size = read_size.saturating_mul(2);
+    };
+    let lines = buf[..complete]
+        .split(|b| *b == b'\n')
+        .filter(|l| !l.is_empty())
+        .map(|l| String::from_utf8_lossy(l).to_string())
+        .collect::<Vec<_>>();
+    Some((lines, mtime_ms, start as i64 + complete as i64))
+}
+
+fn flag_observer(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    if s.contains(OBSERVER_MARKER) {
+        return true;
+    }
+    // The encoded project dir collapses `/` and `.` to `-`, so the marker becomes
+    // `-Users-yolk--claude-mem-observer-sessions`.
+    s.contains("-claude-mem-observer-sessions")
+}
+
+/// Collects `*.jsonl` from a project dir, plus each session's `subagents/` folder.
+fn jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    if flag_observer(dir) {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        if flag_observer(&p) {
+            continue;
+        }
+        if p.is_dir() {
+            continue;
+        }
+        if p.extension().and_then(|x| x.to_str()) == Some("jsonl") {
+            out.push(p);
+        }
+    }
+    // one level down: <sessionId>/subagents/agent-*.jsonl
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let session = e.path();
+        if !session.is_dir() || flag_observer(&session) {
+            continue;
+        }
+        let sub = session.join("subagents");
+        let Ok(sub_entries) = std::fs::read_dir(&sub) else { continue };
+        for se in sub_entries.flatten() {
+            let sp = se.path();
+            if flag_observer(&sp) {
+                continue;
+            }
+            if sp.extension().and_then(|x| x.to_str()) == Some("jsonl") {
+                out.push(sp);
+            }
+        }
+    }
+}
+
+fn claude_row(
+    id: String,
+    session_id: &str,
+    project: &str,
+    model: &str,
+    ts_ms: i64,
+    tokens: TokenUsage,
+) -> Option<MessageRow> {
+    let model = model.trim();
+    if model.is_empty() || model == "<synthetic>" {
+        return None;
+    }
+    Some(MessageRow {
+        id,
+        agent: Agent::Claude,
+        session_id: session_id.to_string(),
+        project: project.to_string(),
+        model: model.to_string(),
+        ts_ms,
+        tokens,
+    })
+}
+
+fn claude_usage(u: &Value) -> TokenUsage {
+    let get = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+    TokenUsage {
+        input: get("input_tokens"),
+        output: get("output_tokens"),
+        cache_read: get("cache_read_input_tokens"),
+        cache_write: get("cache_creation_input_tokens"),
+        reasoning: u
+            .get("output_tokens_details")
+            .and_then(|d| d.get("thinking_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    }
+}
+
+pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> IndexReport {
+    let mut report = IndexReport::default();
+    if !projects_dir.exists() {
+        return report;
+    }
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(projects_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                jsonl_files(&p, &mut files);
+            }
+        }
+    }
+    files.sort();
+
+    for path in files {
+        let key = path.to_string_lossy().to_string();
+        report.files_scanned += 1;
+        let Some((mtime_ms, size)) = file_meta(&path) else {
+            report.errors.push(format!("stat failed: {key}"));
+            continue;
+        };
+        let progress = store.file_progress(&key);
+        if let Some(p) = &progress {
+            if p.mtime_ms == mtime_ms && p.size == size {
+                report.files_skipped += 1;
+                report.files_scanned -= 1;
+                continue;
+            }
+        }
+        let Some((lines, mtime_ms, offset)) = read_new_lines(&path, progress.as_ref()) else {
+            report.errors.push(format!("read failed: {key}"));
+            continue;
+        };
+
+        let session_id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if let Some(p) = &progress {
+            if size < p.size {
+                // File was rewritten shorter: drop its rows before re-reading from 0.
+                if let Err(e) = store.delete_session(Agent::Claude, &session_id) {
+                    report.errors.push(format!("delete failed: {e}"));
+                }
+            }
+        }
+        let mut cwd = String::new();
+        let rows: Vec<MessageRow> = lines
+            .iter()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|v| v.get("type").and_then(Value::as_str) == Some("assistant"))
+            .filter_map(|v| {
+                if let Some(c) = v.get("cwd").and_then(Value::as_str) {
+                    cwd = c.to_string();
+                }
+                let msg = v.get("message")?;
+                let mid = msg.get("id").and_then(Value::as_str)?;
+                let model = msg.get("model").and_then(Value::as_str)?;
+                let usage = claude_usage(msg.get("usage")?);
+                let ts = v
+                    .get("timestamp")
+                    .and_then(Value::as_str)
+                    .and_then(parse_iso_ms)
+                    .unwrap_or(mtime_ms);
+                let project = if cwd.is_empty() {
+                    "unknown".to_string()
+                } else {
+                    crate::live::project_name(&cwd, home)
+                };
+                claude_row(
+                    format!("claude:{mid}"),
+                    &session_id,
+                    &project,
+                    model,
+                    ts,
+                    usage,
+                )
+            })
+            .collect();
+
+        match store.upsert_messages(&rows) {
+            Ok(n) => report.messages_upserted += n,
+            Err(e) => report.errors.push(format!("upsert failed: {e}")),
+        }
+        if let Err(e) = store.set_file_progress(&FileProgress {
+            path: key,
+            mtime_ms,
+            size,
+            offset,
+        }) {
+            report.errors.push(format!("progress failed: {e}"));
+        }
+    }
+    report
+}
+
+fn codex_token_usage(v: &Value) -> TokenUsage {
+    let get = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+    TokenUsage {
+        input: get("input_tokens"),
+        output: get("output_tokens"),
+        cache_read: get("cached_input_tokens"),
+        cache_write: get("cache_write_input_tokens"),
+        reasoning: get("reasoning_output_tokens"),
+    }
+}
+
+pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexReport {
+    let mut report = IndexReport::default();
+    if !sessions_dir.exists() {
+        return report;
+    }
+    let mut files = Vec::new();
+    let mut stack = vec![sessions_dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            if flag_observer(&p) {
+                continue;
+            }
+            if p.is_dir() {
+                stack.push(p);
+            } else if p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("rollout-") && n.ends_with(".jsonl"))
+                .unwrap_or(false)
+            {
+                files.push(p);
+            }
+        }
+    }
+    files.sort();
+
+    for path in files {
+        let key = path.to_string_lossy().to_string();
+        report.files_scanned += 1;
+        let Some((mtime_ms, size)) = file_meta(&path) else {
+            report.errors.push(format!("stat failed: {key}"));
+            continue;
+        };
+        let progress = store.file_progress(&key);
+        if let Some(p) = &progress {
+            if p.mtime_ms == mtime_ms && p.size == size {
+                report.files_skipped += 1;
+                report.files_scanned -= 1;
+                continue;
+            }
+        }
+        let Some((lines, mtime_ms, offset)) = read_new_lines(&path, progress.as_ref()) else {
+            report.errors.push(format!("read failed: {key}"));
+            continue;
+        };
+
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.trim_start_matches("rollout-").to_string())
+            .unwrap_or_default();
+        let mut model = String::new();
+        let mut cwd = String::new();
+        let mut ordinal: i64 = 0;
+        let mut rows = Vec::new();
+        for line in &lines {
+            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+            let payload = v.get("payload").unwrap_or(&Value::Null);
+            match v.get("type").and_then(Value::as_str) {
+                Some("session_meta") => {
+                    if let Some(c) = payload.get("cwd").and_then(Value::as_str) {
+                        cwd = c.to_string();
+                    }
+                }
+                Some("turn_context") => {
+                    if let Some(c) = payload.get("cwd").and_then(Value::as_str) {
+                        cwd = c.to_string();
+                    }
+                    if let Some(m) = payload.get("model").and_then(Value::as_str) {
+                        model = m.to_string();
+                    }
+                }
+                Some("event_msg") => {
+                    if payload.get("type").and_then(Value::as_str) != Some("token_count") {
+                        continue;
+                    }
+                    ordinal += 1;
+                    let Some(usage) = payload.get("info").and_then(|i| i.get("last_token_usage")) else {
+                        continue;
+                    };
+                    if model.is_empty() {
+                        continue;
+                    }
+                    let ts = v
+                        .get("timestamp")
+                        .and_then(Value::as_str)
+                        .and_then(parse_iso_ms)
+                        .unwrap_or(mtime_ms);
+                    let project = if cwd.is_empty() {
+                        "unknown".to_string()
+                    } else {
+                        crate::live::project_name(&cwd, home)
+                    };
+                    rows.push(MessageRow {
+                        id: format!("codex:{stem}:{ordinal}"),
+                        agent: Agent::Codex,
+                        session_id: stem.clone(),
+                        project,
+                        model: model.clone(),
+                        ts_ms: ts,
+                        tokens: codex_token_usage(usage),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        match store.upsert_messages(&rows) {
+            Ok(n) => report.messages_upserted += n,
+            Err(e) => report.errors.push(format!("upsert failed: {e}")),
+        }
+        if let Err(e) = store.set_file_progress(&FileProgress {
+            path: key,
+            mtime_ms,
+            size,
+            offset,
+        }) {
+            report.errors.push(format!("progress failed: {e}"));
+        }
+    }
+    report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::Store;
+
+    fn append(path: &Path, s: &str) {
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+        f.write_all(s.as_bytes()).unwrap();
+    }
+
+    fn home() -> &'static str {
+        "/Users/yolk"
+    }
+
+    fn claude_assistant(mid: &str, cwd: &str, model: &str, output: u64) -> String {
+        format!(
+            r#"{{"type":"assistant","cwd":"{cwd}","timestamp":"2026-09-21T09:42:37.055Z","message":{{"id":"{mid}","model":"{model}","usage":{{"input_tokens":10,"output_tokens":{output},"cache_read_input_tokens":100,"cache_creation_input_tokens":1000,"output_tokens_details":{{"thinking_tokens":5}}}}}}}}"#
+        )
+    }
+
+    fn store_at(dir: &Path) -> Store {
+        Store::open(&dir.join("agent-deck.db")).unwrap()
+    }
+
+    #[test]
+    fn parse_iso_ms_handles_utc_and_offset() {
+        // NB: the plan listed 1789033357055 here, but that constant is wrong for
+        // 2026-09-21T09:42:37.055Z (verified against a reference epoch conversion).
+        let expected = 1789983757055;
+        assert_eq!(parse_iso_ms("2026-09-21T09:42:37.055Z"), Some(expected));
+        assert_eq!(parse_iso_ms("2026-09-21T16:42:37.055+07:00"), Some(expected));
+        assert_eq!(parse_iso_ms("not a date"), None);
+    }
+
+    #[test]
+    fn claude_indexes_assistant_usage_once_per_message_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("s1.jsonl"),
+            format!(
+                "{}\n{}\n",
+                claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 50),
+                claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 50)
+            ),
+        )
+        .unwrap();
+
+        let mut s = store_at(tmp.path());
+        let r = index_claude(&mut s, &projects, home());
+        assert_eq!(r.messages_upserted, 2);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(s.counts().unwrap().1, 1);
+        let t = s.totals(0).unwrap();
+        assert_eq!(t.messages, 1);
+        assert_eq!(t.tokens.output, 50);
+        let models = s.by_model(0).unwrap();
+        assert_eq!(models[0].model, "claude-sonnet-5");
+        assert_eq!(models[0].agent, Agent::Claude);
+        let p = s.by_project(0).unwrap();
+        assert_eq!(p[0].project, "kirimi");
+    }
+
+    #[test]
+    fn claude_skips_observer_sessions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let observer = projects.join(encode_cwd("/Users/yolk/.claude-mem/observer-sessions"));
+        std::fs::create_dir_all(&observer).unwrap();
+        std::fs::write(
+            observer.join("o1.jsonl"),
+            format!("{}\n", claude_assistant("m1", "/Users/yolk/.claude-mem/observer-sessions", "claude-sonnet-5", 9)),
+        )
+        .unwrap();
+
+        let mut s = store_at(tmp.path());
+        let r = index_claude(&mut s, &projects, home());
+        assert_eq!(r.files_scanned, 0);
+        assert_eq!(r.messages_upserted, 0);
+        assert_eq!(s.counts().unwrap().1, 0);
+    }
+
+    #[test]
+    fn claude_skips_unchanged_files_on_second_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("s1.jsonl"), format!("{}\n", claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 5))).unwrap();
+
+        let mut s = store_at(tmp.path());
+        let first = index_claude(&mut s, &projects, home());
+        assert_eq!(first.files_scanned, 1);
+        assert_eq!(first.messages_upserted, 1);
+
+        let second = index_claude(&mut s, &projects, home());
+        assert_eq!(second.files_scanned, 0);
+        assert!(second.files_skipped >= 1);
+        assert_eq!(second.messages_upserted, 0);
+        assert_eq!(s.counts().unwrap().1, 1);
+    }
+
+    #[test]
+    fn claude_resumes_from_offset_when_file_grows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("s1.jsonl");
+        std::fs::write(&file, format!("{}\n", claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 5))).unwrap();
+
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        append(&file, &format!("{}\n", claude_assistant("m2", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 7)));
+
+        let second = index_claude(&mut s, &projects, home());
+        assert_eq!(second.messages_upserted, 1);
+        assert!(second.files_scanned >= 1);
+        let t = s.totals(0).unwrap();
+        assert_eq!(t.messages, 2);
+        assert_eq!(t.tokens.output, 12);
+    }
+
+    #[test]
+    fn claude_restarts_when_file_shrinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("s1.jsonl");
+        std::fs::write(&file, format!("{}\n", claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 500))).unwrap();
+
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        assert_eq!(s.totals(0).unwrap().tokens.output, 500);
+
+        std::fs::write(&file, format!("{}\n", claude_assistant("m2", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 3))).unwrap();
+        index_claude(&mut s, &projects, home());
+
+        let models = s.by_model(0).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].tokens.output, 3);
+        assert_eq!(models[0].messages, 1);
+    }
+
+    #[test]
+    fn claude_indexes_subagent_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/submo"));
+        let sub = dir.join("sess-1").join("subagents");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(dir.join("sess-1.jsonl"), format!("{}\n", claude_assistant("m1", "/Users/yolk/Dev/submo", "claude-sonnet-5", 5))).unwrap();
+        std::fs::write(sub.join("agent-x.jsonl"), format!("{}\n", claude_assistant("m2", "/Users/yolk/Dev/submo", "claude-haiku-4-5", 9))).unwrap();
+
+        let mut s = store_at(tmp.path());
+        let r = index_claude(&mut s, &projects, home());
+        assert_eq!(r.messages_upserted, 2);
+        assert_eq!(s.counts().unwrap().1, 2);
+        let models = s.by_model(0).unwrap();
+        assert_eq!(models.len(), 2);
+        assert!(models.iter().any(|m| m.model == "claude-haiku-4-5"));
+    }
+
+    #[test]
+    fn claude_skips_records_without_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let no_model = r#"{"type":"assistant","cwd":"/Users/yolk/Dev/kirimi","timestamp":"2026-09-21T09:42:37.055Z","message":{"id":"nm","usage":{"input_tokens":1,"output_tokens":1}}}"#;
+        let synthetic = r#"{"type":"assistant","cwd":"/Users/yolk/Dev/kirimi","timestamp":"2026-09-21T09:42:37.055Z","message":{"id":"sy","model":"<synthetic>","usage":{"input_tokens":1,"output_tokens":1}}}"#;
+        std::fs::write(
+            dir.join("s1.jsonl"),
+            format!("{no_model}\n{synthetic}\n{}\n", claude_assistant("ok", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 4)),
+        )
+        .unwrap();
+
+        let mut s = store_at(tmp.path());
+        let r = index_claude(&mut s, &projects, home());
+        assert_eq!(r.messages_upserted, 1);
+        assert_eq!(s.counts().unwrap().1, 1);
+        assert_eq!(s.totals(0).unwrap().tokens.output, 4);
+    }
+
+    #[test]
+    fn codex_indexes_token_count_events() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions = tmp.path().join("sessions/2026/04/04");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let meta = r#"{"timestamp":"2026-04-03T22:54:57.166Z","type":"session_meta","payload":{"session_id":"abc","cwd":"/Users/yolk/Dev/kirimi"}}"#;
+        let ctx = r#"{"timestamp":"2026-04-03T22:54:57.168Z","type":"turn_context","payload":{"cwd":"/Users/yolk/Dev/kirimi","model":"gpt-5.4"}}"#;
+        let count = |input: u64, cached: u64, out: u64, reasoning: u64| {
+            format!(
+                r#"{{"timestamp":"2026-04-03T22:55:10.000Z","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":1,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}},"last_token_usage":{{"input_tokens":{input},"cached_input_tokens":{cached},"cache_write_input_tokens":0,"output_tokens":{out},"reasoning_output_tokens":{reasoning}}}}}}}}}"#
+            )
+        };
+        std::fs::write(
+            sessions.join("rollout-2026-04-04T05-54-28-abc.jsonl"),
+            format!("{meta}\n{ctx}\n{}\n{}\n", count(100, 40, 7, 3), count(200, 80, 9, 4)),
+        )
+        .unwrap();
+
+        let mut s = store_at(tmp.path());
+        let r = index_codex(&mut s, &tmp.path().join("sessions"), home());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(r.messages_upserted, 2);
+
+        let models = s.by_model(0).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].model, "gpt-5.4");
+        assert_eq!(models[0].agent, Agent::Codex);
+        assert_eq!(models[0].messages, 2);
+        assert_eq!(models[0].tokens.input, 300);
+        assert_eq!(models[0].tokens.cache_read, 120);
+        assert_eq!(models[0].tokens.output, 16);
+        assert_eq!(models[0].tokens.reasoning, 7);
+
+        let projects = s.by_project(0).unwrap();
+        assert_eq!(projects[0].project, "kirimi");
+    }
+}
