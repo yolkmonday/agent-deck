@@ -1,8 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, Plus, Search, Trash2, XCircle, Zap } from "lucide-react";
 import { useState } from "react";
+import { ModelPickerDialog } from "@/components/ModelPickerDialog";
 import type { ModelTestResult, OcModel } from "@/lib/api";
 import { modelTest, modelsFetch } from "@/lib/api";
+import { mergeFetched } from "@/lib/models";
 
 interface ModelListProps {
   providerId: string;
@@ -90,17 +92,19 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [fetched, setFetched] = useState<string[] | null>(null);
   const [tests, setTests] = useState<Record<string, ModelTestResult>>({});
 
   const fetchModels = useMutation({
     mutationFn: () => modelsFetch(providerId),
     onSuccess: (ids) => {
       setAddError(null);
-      const known = new Set(models.map((m) => m.id));
-      const added = ids
-        .filter((id) => !known.has(id))
-        .map((id) => ({ id, name: null, contextLimit: null, outputLimit: null }));
-      onChange([...models, ...added]);
+      if (ids.length === 0) {
+        setAddError("Endpoint tidak mengembalikan model.");
+        setFetched(null);
+        return;
+      }
+      setFetched(ids);
     },
     onError: (e) => setAddError(String(e)),
   });
@@ -178,6 +182,18 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
           onAdd={(model) => {
             onChange([...models, model]);
             setAdding(false);
+          }}
+        />
+      )}
+
+      {fetched !== null && (
+        <ModelPickerDialog
+          fetched={fetched}
+          existing={models}
+          onCancel={() => setFetched(null)}
+          onAdd={(ids) => {
+            onChange(mergeFetched(models, ids));
+            setFetched(null);
           }}
         />
       )}
