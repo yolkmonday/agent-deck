@@ -21,7 +21,7 @@ pub enum ToolStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "kind")]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TailEntry {
     #[serde(rename_all = "camelCase")]
     User { ms: i64, text: String },
