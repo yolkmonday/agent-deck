@@ -24,6 +24,15 @@ test("busy to waiting emits a needs-answer event", () => {
   expect(ev[0]).toMatchObject({ project: "noor", color: "waiting", text: "butuh jawaban" });
 });
 
+test("new session keeps its own status colour", () => {
+  const waitingSession = { ...base, id: "w", status: "waiting" as const };
+  expect(diffEvents([], [waitingSession], 1000)[0]).toMatchObject({
+    color: "waiting",
+    text: "sesi dimulai",
+  });
+  expect(diffEvents([], [base], 1000)[0].color).toBe("busy");
+});
+
 test("new tool activity emits a tool event, unchanged activity emits nothing", () => {
   const withTool = { ...base, activity: { kind: "tool" as const, label: "Bash", detail: "bun test" } };
   expect(diffEvents([base], [withTool], 3000)[0].text).toBe("Bash bun test");

@@ -16,7 +16,8 @@ export const diffEvents = (prev: Session[] | null, next: Session[], nowMs: numbe
   for (const s of next) {
     const old = before.get(s.id);
     if (!old) {
-      push(s, "busy", "sesi dimulai");
+      const color = s.status === "waiting" ? "waiting" : s.status === "idle" ? "idle" : "busy";
+      push(s, color, "sesi dimulai");
       continue;
     }
     if (old.status !== s.status) {
