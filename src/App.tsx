@@ -4,6 +4,7 @@ import { NavProvider, type PageKey } from "@/lib/nav";
 import { LivePage } from "@/pages/LivePage";
 import { ProviderEditPage } from "@/pages/ProviderEditPage";
 import { ProviderOverviewPage } from "@/pages/ProviderOverviewPage";
+import { ProjectPage } from "@/pages/ProjectPage";
 import { SavingsPage } from "@/pages/SavingsPage";
 import { TerminalPage } from "@/pages/TerminalPage";
 import { TimelinePage } from "@/pages/TimelinePage";
@@ -36,6 +37,9 @@ const App = () => {
         setProviderTarget(id === "" ? null : id);
         setPage("provider");
       },
+      project: () => {
+        setPage("project");
+      },
     }),
     [],
   );
@@ -60,6 +64,7 @@ const App = () => {
           ) : (
             <ProviderEditPage providerId={providerTarget === "__new__" ? null : providerTarget} />
           ))}
+        {page === "project" && <ProjectPage />}
       </div>
     </NavProvider>
   );
