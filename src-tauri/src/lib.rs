@@ -1,3 +1,5 @@
+mod terminal;
+
 use collector::indexer::{index_claude, index_codex, index_opencode, IndexReport};
 use collector::live::{LiveCollector, Paths};
 use collector::model::{Agent, LiveSnapshot, TokenUsage};
