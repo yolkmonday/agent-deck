@@ -41,7 +41,7 @@ pub fn project_name(cwd: &str, home: &str) -> String {
 pub struct LiveCollector {
     paths: Paths,
     procs: Arc<dyn ProcessTable>,
-    transcripts: HashMap<String, (PathBuf, TranscriptState)>,
+    transcripts: HashMap<(String, String), (PathBuf, TranscriptState)>,
 }
 
 fn claude_activity(c: &ClaudeLive, st: &TranscriptState) -> Option<Activity> {
@@ -104,7 +104,7 @@ impl LiveCollector {
         let projects = self.paths.claude_projects.clone();
         let (path, state) = self
             .transcripts
-            .entry(c.session_id.clone())
+            .entry((c.session_id.clone(), c.cwd.clone()))
             .or_insert_with(|| (PathBuf::new(), TranscriptState::default()));
         if path.as_os_str().is_empty() {
             if let Some(p) = find_transcript(&projects, &c.cwd, &c.session_id) {
@@ -135,8 +135,9 @@ impl LiveCollector {
         let mut warnings = Vec::new();
 
         let claude = read_claude_sessions(&self.paths.claude_sessions, self.procs.as_ref());
-        let live_ids: HashSet<String> = claude.iter().map(|c| c.session_id.clone()).collect();
-        self.transcripts.retain(|id, _| live_ids.contains(id));
+        let live_ids: HashSet<(String, String)> =
+            claude.iter().map(|c| (c.session_id.clone(), c.cwd.clone())).collect();
+        self.transcripts.retain(|key, _| live_ids.contains(key));
         for c in claude {
             sessions.push(self.claude_session(c));
         }
@@ -243,6 +244,31 @@ mod tests {
         let a = c.snapshot(10).sessions[0].activity.clone().unwrap();
         assert_eq!(a.kind, ActivityKind::Waiting);
         assert_eq!(a.detail.as_deref(), Some("input needed"));
+    }
+
+    #[test]
+    fn same_session_id_in_two_cwds_keeps_separate_transcript_state() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "dup", "/Users/yolk/Dev/a", "busy", 10);
+        claude_session(&paths, 2, "dup", "/Users/yolk/Dev/b", "busy", 20);
+        for (enc, out) in [("-Users-yolk-Dev-a", 11u64), ("-Users-yolk-Dev-b", 22u64)] {
+            let dir = paths.claude_projects.join(enc);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("dup.jsonl"),
+                format!("{{\"type\":\"assistant\",\"message\":{{\"id\":\"m-{enc}\",\"usage\":{{\"output_tokens\":{out}}}}}}}\n"),
+            )
+            .unwrap();
+        }
+        let mut procs = FakeProcessTable::default();
+        procs.alive.extend([1, 2]);
+        let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
+
+        let snap = c.snapshot(100);
+        let a = snap.sessions.iter().find(|s| s.cwd.ends_with("/a")).unwrap();
+        let b = snap.sessions.iter().find(|s| s.cwd.ends_with("/b")).unwrap();
+        assert_eq!(a.tokens.output, 11);
+        assert_eq!(b.tokens.output, 22);
     }
 
     #[test]
