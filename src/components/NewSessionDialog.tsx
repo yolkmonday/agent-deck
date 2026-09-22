@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Icon } from "@iconify/react";
 import { useEffect, useState } from "react";
 import { AgentIcon } from "@/components/BrandIcon";
 import type { Project, TermProfile } from "@/lib/api";
 import { projectTouch, projectsList, termProfiles } from "@/lib/api";
 import { useNavigate } from "@/lib/nav";
+import { pickFolder } from "@/lib/pick";
 import { useLive } from "@/store/live";
 import { useTerminal } from "@/store/terminal";
 
@@ -37,6 +39,8 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
   const [free, setFree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [pickError, setPickError] = useState<string | null>(null);
 
   useEffect(() => {
     void termProfiles()
@@ -69,6 +73,27 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
     setProjectId(p.id);
     setCwd(p.path);
     if (p.defaultProfile !== null) setProfileId(p.defaultProfile);
+  };
+
+  const browse = async () => {
+    if (picking) return;
+    setPicking(true);
+    setPickError(null);
+    try {
+      const typed = cwd.trim();
+      const picked = await pickFolder({
+        title: "Pilih folder kerja",
+        defaultPath: typed.startsWith("/") ? typed : undefined,
+      });
+      if (picked === null) return;
+      setCwd(picked);
+      setFree(true);
+      setProjectId(null);
+    } catch (e) {
+      setPickError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPicking(false);
+    }
   };
 
   const submit = async () => {
@@ -189,22 +214,36 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
 
         <div className="flex flex-col gap-2">
           <span className="text-xs text-fg-3">Direktori kerja</span>
-          <input
-            value={cwd}
-            onChange={(e) => {
-              setCwd(e.target.value);
-              setFree(true);
-              setProjectId(null);
-            }}
-            list="terminal-cwd-options"
-            placeholder="/Users/kamu/Dev/proyek"
-            className="rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs text-fg outline-none focus:border-busy/60"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              value={cwd}
+              onChange={(e) => {
+                setCwd(e.target.value);
+                setFree(true);
+                setProjectId(null);
+              }}
+              list="terminal-cwd-options"
+              placeholder="/Users/kamu/Dev/proyek"
+              className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs text-fg outline-none focus:border-busy/60"
+            />
+            <button
+              type="button"
+              disabled={picking}
+              onClick={() => void browse()}
+              className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-[11.5px] font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
+            >
+              <Icon icon="lucide:folder-open" width={13} height={13} />
+              {picking ? "Membuka…" : "Pilih folder…"}
+            </button>
+          </div>
           <datalist id="terminal-cwd-options">
             {cwdOptions.map((c) => (
               <option key={c} value={c} />
             ))}
           </datalist>
+          {pickError !== null && (
+            <span className="font-mono text-[11.5px] text-err">Gagal membuka Finder: {pickError}</span>
+          )}
         </div>
 
         <div className="flex flex-col gap-2 rounded-md border border-border bg-bg px-3 py-2.5">

@@ -1258,6 +1258,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let home = std::env::var("HOME").unwrap_or_default();
             let dir = data_dir(&app.handle().clone());
