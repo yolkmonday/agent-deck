@@ -225,6 +225,17 @@ impl BillingTable {
     }
 }
 
+/// The price of a message at API rates, and the part of it that actually leaves
+/// the bank account. A subscription saves `notional` in full, so its spend is
+/// always zero — the month costs whatever the plan costs, never more.
+pub fn split_cost(account: Option<&BillingAccount>, notional: f64) -> (f64, f64) {
+    match account.map(|a| a.mode) {
+        Some(BillingMode::Subscription) => (0.0, notional),
+        // Prepaid credit is consumed at API rates, so it moves money like payg.
+        Some(BillingMode::Prepaid) | Some(BillingMode::Payg) | None => (notional, notional),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +347,28 @@ mod tests {
 
         let payg = account(BillingMode::Payg, &["gpt-"]);
         assert_eq!(days_left(&payg, date("2026-03-10")), None);
+    }
+
+    #[test]
+    fn split_cost_subscription_has_zero_spend_and_full_notional() {
+        let sub = account(BillingMode::Subscription, &["claude-"]);
+        let (spend, notional) = split_cost(Some(&sub), 806.42);
+        assert_eq!(spend, 0.0, "a subscription's tokens cost nothing extra");
+        assert_eq!(notional, 806.42);
+    }
+
+    #[test]
+    fn split_cost_payg_and_prepaid_spend_the_full_amount() {
+        let payg = account(BillingMode::Payg, &["gpt-"]);
+        assert_eq!(split_cost(Some(&payg), 12.5), (12.5, 12.5));
+
+        let prepaid = account(BillingMode::Prepaid, &["kn/"]);
+        assert_eq!(split_cost(Some(&prepaid), 3.25), (3.25, 3.25));
+    }
+
+    #[test]
+    fn split_cost_without_an_account_is_payg() {
+        assert_eq!(split_cost(None, 7.0), (7.0, 7.0));
     }
 
     #[test]
