@@ -2,6 +2,7 @@ mod config;
 mod probe;
 mod projects;
 mod providers;
+mod recover;
 mod secrets;
 mod terminal;
 

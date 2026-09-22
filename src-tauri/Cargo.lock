@@ -16,6 +16,7 @@ dependencies = [
  "collector",
  "dirs 5.0.1",
  "jsonc-parser",
+ "libc",
  "portable-pty",
  "reqwest 0.12.28",
  "rusqlite",
