@@ -244,6 +244,11 @@ impl TerminalRegistry {
         let mut cmd = portable_pty::CommandBuilder::new(&profile.program);
         cmd.args(profile.args.iter());
         cmd.cwd(cwd);
+        // When Agent Deck is itself launched from a Claude session, this marker is inherited and
+        // the agent we spawn turns transcript saving OFF. The dashboard would then show that
+        // session with no activity and no tokens, which is the opposite of the point. Sessions
+        // started from here are the user's own, not a nested agent run.
+        cmd.env_remove("CLAUDE_CODE_CHILD_SESSION");
         let child = pair.slave.spawn_command(cmd)?;
         let killer = child.clone_killer();
         drop(pair.slave);
