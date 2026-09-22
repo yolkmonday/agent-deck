@@ -238,8 +238,42 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    pub fn totals(&self, since_ms: i64) -> Result<TotalsAgg> {
-        self.conn.query_row(
+    /// Per-(local date, agent, model) buckets. The cost of a day/agent bucket is the
+    /// sum of its per-model costs, which is why the caller needs model detail.
+    pub fn daily_by_model(&self, since_ms: i64) -> Result<Vec<(String, Agent, String, TokenUsage)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT strftime('%Y-%m-%d', ts_ms/1000, 'unixepoch', 'localtime') AS d, agent, model, \
+                    SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), SUM(reasoning) \
+             FROM message WHERE ts_ms >= ?1 GROUP BY d, agent, model",
+        )?;
+        let rows = stmt.query_map([since_ms], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                agent_from_str(&r.get::<_, String>(1)?),
+                r.get::<_, String>(2)?,
+                usage_from_row(r, 3)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Per-(project, model) buckets, for the same cost reason as `daily_by_model`.
+    pub fn by_project_model(&self, since_ms: i64) -> Result<Vec<(String, String, TokenUsage)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT project, model, SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), SUM(reasoning) \
+             FROM message WHERE ts_ms >= ?1 GROUP BY project, model",
+        )?;
+        let rows = stmt.query_map([since_ms], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                usage_from_row(r, 2)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn totals(&self, since_ms: i64) -> Result<TotalsAgg> {        self.conn.query_row(
             "SELECT COALESCE(SUM(input),0), COALESCE(SUM(output),0), COALESCE(SUM(cache_read),0), \
                     COALESCE(SUM(cache_write),0), COALESCE(SUM(reasoning),0), COUNT(*) \
              FROM message WHERE ts_ms >= ?1",

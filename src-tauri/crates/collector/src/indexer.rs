@@ -1,9 +1,9 @@
+use crate::live::project_name;
 use crate::model::{Agent, TokenUsage};
 use crate::store::{FileProgress, MessageRow, Store};
-use crate::transcript::encode_cwd;
 use serde_json::Value;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 const OBSERVER_MARKER: &str = "/.claude-mem/observer-sessions";
@@ -220,7 +220,7 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
                 let project = if cwd.is_empty() {
                     "unknown".to_string()
                 } else {
-                    crate::live::project_name(&cwd, home)
+                    project_name(&cwd, home)
                 };
                 claude_row(
                     format!("claude:{mid}"),
@@ -353,7 +353,7 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
                     let project = if cwd.is_empty() {
                         "unknown".to_string()
                     } else {
-                        crate::live::project_name(&cwd, home)
+                        project_name(&cwd, home)
                     };
                     rows.push(MessageRow {
                         id: format!("codex:{stem}:{ordinal}"),
@@ -451,7 +451,7 @@ pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
             id: format!("opencode:{id}"),
             agent: Agent::Opencode,
             session_id: id.clone(),
-            project: crate::live::project_name(&directory, home),
+            project: project_name(&directory, home),
             model,
             ts_ms: ts,
             tokens: TokenUsage {
@@ -480,9 +480,11 @@ pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
 }
 
 #[cfg(test)]
-mod tests {    use super::*;
+mod tests {
+    use super::*;
     use crate::store::Store;
-
+    use crate::transcript::encode_cwd;
+    use std::io::Write;
     fn append(path: &Path, s: &str) {
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
         f.write_all(s.as_bytes()).unwrap();
