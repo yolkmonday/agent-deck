@@ -3,7 +3,15 @@ import { KpiRow } from "@/components/KpiRow";
 import { SessionCard } from "@/components/SessionCard";
 import { useLive } from "@/store/live";
 
-export const LivePage = ({ onOpenTerminal }: { onOpenTerminal: (sessionId?: string) => void }) => {
+export const LivePage = ({
+  onOpenTerminal,
+  highlightSessionId = null,
+  onHighlightDone,
+}: {
+  onOpenTerminal: (sessionId?: string) => void;
+  highlightSessionId?: string | null;
+  onHighlightDone?: () => void;
+}) => {
   const snapshot = useLive((s) => s.snapshot);
   const events = useLive((s) => s.events);
   const sessions = snapshot?.sessions ?? [];
@@ -38,7 +46,14 @@ export const LivePage = ({ onOpenTerminal }: { onOpenTerminal: (sessionId?: stri
           ) : (
             <div className="grid grid-cols-3 gap-4">
               {sessions.map((s) => (
-                <SessionCard key={s.id} session={s} nowMs={nowMs} onOpenTerminal={onOpenTerminal} />
+                <SessionCard
+                  key={s.id}
+                  session={s}
+                  nowMs={nowMs}
+                  onOpenTerminal={onOpenTerminal}
+                  highlighted={s.id === highlightSessionId}
+                  onHighlightDone={onHighlightDone}
+                />
               ))}
             </div>
           )}

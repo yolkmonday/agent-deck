@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import type { TermSession } from "@/lib/api";
 import { termResize, termScrollback, termWrite } from "@/lib/api";
-import { registerWriter } from "@/store/terminal";
+import { registerFocuser, registerWriter } from "@/store/terminal";
 
 const cssVar = (name: string, fallback: string) => {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -82,6 +82,7 @@ export const TerminalView = ({ session }: { session: TermSession }) => {
     };
 
     const unsubscribe = registerWriter(session.id, (chunk) => term.write(chunk));
+    const unFocus = registerFocuser(session.id, () => term.focus());
     const onData = term.onData((data) => {
       pending += data;
       if (inputFrame === 0) {
@@ -117,6 +118,7 @@ export const TerminalView = ({ session }: { session: TermSession }) => {
       if (inputFrame !== 0) cancelAnimationFrame(inputFrame);
       observer.disconnect();
       unsubscribe();
+      unFocus();
       onData.dispose();
       term.dispose();
     };

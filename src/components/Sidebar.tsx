@@ -1,9 +1,17 @@
 import { Radar } from "lucide-react";
 import { NAV_ITEMS, type PageKey } from "@/lib/nav";
-import { useLive } from "@/store/live";
 
-export const Sidebar = ({ page, onSelect }: { page: PageKey; onSelect: (page: PageKey) => void }) => {
-  const waiting = useLive((s) => s.snapshot?.sessions.filter((x) => x.status === "waiting").length ?? 0);
+export const Sidebar = ({
+  page,
+  onSelect,
+  onJumpWaiting,
+  waitingCount,
+}: {
+  page: PageKey;
+  onSelect: (page: PageKey) => void;
+  onJumpWaiting: () => void;
+  waitingCount: number;
+}) => {
   return (
     <aside className="flex w-58 shrink-0 flex-col border-r border-border">
       <div className="flex items-center gap-2.5 px-5 py-5.5">
@@ -25,9 +33,23 @@ export const Sidebar = ({ page, onSelect }: { page: PageKey; onSelect: (page: Pa
             >
               <Icon size={16} />
               <span className="flex-1">{label}</span>
-              {key === "live" && waiting > 0 && (
-                <span className="rounded-full bg-waiting px-1.75 py-0.5 text-[11px] font-semibold text-bg">
-                  {waiting} tunggu
+              {key === "live" && waitingCount > 0 && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title="Buka sesi yang menunggu"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onJumpWaiting();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.stopPropagation();
+                    onJumpWaiting();
+                  }}
+                  className="cursor-pointer rounded-full bg-waiting px-1.75 py-0.5 text-[11px] font-semibold text-bg"
+                >
+                  {waitingCount} tunggu
                 </span>
               )}
             </button>

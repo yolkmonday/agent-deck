@@ -4,12 +4,27 @@ import type { TermDataEvent, TermExitEvent, TermSession } from "@/lib/api";
 import { termKill, termList, termStart } from "@/lib/api";
 
 const writers = new Map<string, (chunk: string) => void>();
+const focusers = new Map<string, () => void>();
 
 export const registerWriter = (id: string, write: (chunk: string) => void): (() => void) => {
   writers.set(id, write);
   return () => {
     if (writers.get(id) === write) writers.delete(id);
   };
+};
+
+export const registerFocuser = (id: string, focus: () => void): (() => void) => {
+  focusers.set(id, focus);
+  return () => {
+    if (focusers.get(id) === focus) focusers.delete(id);
+  };
+};
+
+export const focusTerminal = (id: string): boolean => {
+  const focus = focusers.get(id);
+  if (focus === undefined) return false;
+  focus();
+  return true;
 };
 
 interface TerminalState {
