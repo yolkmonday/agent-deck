@@ -1,7 +1,8 @@
-import { Icon } from "@iconify/react";
+import { useState } from "react";
+import { GroupModal } from "@/components/GroupModal";
 import { KpiRow } from "@/components/KpiRow";
 import { SessionCard } from "@/components/SessionCard";
-import { groupSessions } from "@/lib/grouping";
+import { groupCards } from "@/lib/grouping";
 import { useLive } from "@/store/live";
 
 export const LivePage = ({
@@ -16,7 +17,10 @@ export const LivePage = ({
   const snapshot = useLive((s) => s.snapshot);
   const sessions = snapshot?.sessions ?? [];
   const nowMs = snapshot?.generatedAtMs ?? Date.now();
-  const groups = groupSessions(sessions);
+  const cards = groupCards(sessions);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const open = cards.find((c) => c.key === openKey) ?? null;
+
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
@@ -25,6 +29,7 @@ export const LivePage = ({
           <span className="flex items-center gap-2 text-[12.5px] text-fg-2">
             <span className="size-1.75 rounded-full bg-ok" />
             {sessions.length} sesi aktif
+            {cards.length !== sessions.length && <span className="text-fg-3">· {cards.length} project</span>}
           </span>
         </div>
       </header>
@@ -38,43 +43,39 @@ export const LivePage = ({
           ))}
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold">Sesi berjalan</span>
-            <span className="text-xs text-fg-3">Urut: butuh input dulu, lalu paling baru aktif</span>
+            <span className="text-xs text-fg-3">Urut: butuh input dulu, lalu paling lama jalan</span>
           </div>
           {sessions.length === 0 ? (
             <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-fg-3">
               Belum ada agent yang berjalan. Buka claude atau opencode di terminal.
             </div>
           ) : (
-            <div className="flex flex-col gap-6.5">
-              {groups.map((g) => (
-                <div key={g.key} className="flex flex-col gap-3">
-                  {(g.sessions.length > 1 || g.sessions.some((s) => s.isWorktree)) && (
-                    <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-fg-2">
-                      {g.sessions.some((s) => s.isWorktree) && (
-                        <Icon icon="lucide:folder-git-2" width={12} height={12} className="text-fg-3" />
-                      )}
-                      {g.label}
-                      <span className="font-normal text-fg-3">· {g.sessions.length} sesi</span>
-                    </span>
-                  )}
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] items-stretch gap-4">
-                    {g.sessions.map((s) => (
-                      <SessionCard
-                        key={s.id}
-                        session={s}
-                        nowMs={nowMs}
-                        onOpenTerminal={onOpenTerminal}
-                        highlighted={s.id === highlightSessionId}
-                        onHighlightDone={onHighlightDone}
-                      />
-                    ))}
-                  </div>
-                </div>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] items-stretch gap-4">
+              {cards.map((c) => (
+                <SessionCard
+                  key={c.key}
+                  session={c.primary}
+                  nowMs={nowMs}
+                  onOpenTerminal={onOpenTerminal}
+                  highlighted={c.primary.id === highlightSessionId}
+                  onHighlightDone={onHighlightDone}
+                  siblingCount={c.children.length}
+                  siblingWaiting={c.waitingChildren}
+                  onOpenSiblings={() => setOpenKey(c.key)}
+                />
               ))}
             </div>
           )}
         </main>
       </div>
+      {open && (
+        <GroupModal
+          label={open.label}
+          sessions={open.children}
+          onClose={() => setOpenKey(null)}
+          onOpenTerminal={onOpenTerminal}
+        />
+      )}
     </div>
   );
 };

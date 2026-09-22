@@ -34,3 +34,27 @@ export const groupSessions = (sessions: Session[]): SessionGroup[] => {
   for (const g of groups) g.sessions.sort(withinGroup);
   return groups.sort((a, b) => groupRank(b) - groupRank(a) || newest(b) - newest(a));
 };
+
+/// One card per project: the main checkout leads, everything else in the group
+/// (its worktrees) becomes a collapsed list inside that card.
+export interface GroupCard {
+  key: string;
+  label: string;
+  primary: Session;
+  children: Session[];
+  /// A waiting child must not be buried in a collapsed line, or the board stops
+  /// answering the one question it exists to answer.
+  waitingChildren: number;
+}
+
+export const groupCards = (sessions: Session[]): GroupCard[] =>
+  groupSessions(sessions).map((g) => {
+    const [primary, ...children] = g.sessions;
+    return {
+      key: g.key,
+      label: g.label,
+      primary,
+      children,
+      waitingChildren: children.filter((s) => s.status === "waiting").length,
+    };
+  });

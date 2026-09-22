@@ -65,12 +65,18 @@ export const SessionCard = ({
   onOpenTerminal,
   highlighted = false,
   onHighlightDone,
+  siblingCount = 0,
+  siblingWaiting = 0,
+  onOpenSiblings,
 }: {
   session: Session;
   nowMs: number;
   onOpenTerminal: (sessionId?: string) => void;
   highlighted?: boolean;
   onHighlightDone?: () => void;
+  siblingCount?: number;
+  siblingWaiting?: number;
+  onOpenSiblings?: () => void;
 }) => {
   const waiting = s.status === "waiting";
   const stalled = s.health === "stalled";
@@ -204,6 +210,20 @@ export const SessionCard = ({
           </span>
         )}
       </div>
+      {siblingCount > 0 && (
+        <button
+          type="button"
+          onClick={onOpenSiblings}
+          className={`flex cursor-pointer items-center gap-1.5 border-t border-border pt-1.5 text-left text-[11.5px] ${
+            siblingWaiting > 0 ? "text-waiting" : "text-fg-3 hover:text-fg-2"
+          }`}
+        >
+          <Icon icon="lucide:folder-git-2" width={12} height={12} />
+          {siblingCount} worktree jalan
+          {siblingWaiting > 0 && <span className="font-semibold">· {siblingWaiting} butuh jawaban</span>}
+          <Icon icon="lucide:chevron-right" width={12} height={12} className="ml-auto" />
+        </button>
+      )}
       {/* Collapsed by default: a card whose height changed every time a subagent
           started or finished made the whole board jump around. One stable line. */}
       {s.subagents.length > 0 && (

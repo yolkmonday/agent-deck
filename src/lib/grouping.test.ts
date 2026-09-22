@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { groupSessions } from "@/lib/grouping";
+import { groupCards, groupSessions } from "@/lib/grouping";
 import type { Session } from "@/lib/types";
 
 const session = (over: Partial<Session> & { id: string }): Session => ({
@@ -71,5 +71,30 @@ describe("groupSessions", () => {
     const groups = groupSessions([session({ id: "solo", groupRoot: "/w/solo" })]);
     expect(groups.length).toBe(1);
     expect(groups[0].sessions.map((s) => s.id)).toEqual(["solo"]);
+  });
+});
+
+describe("groupCards", () => {
+  test("the main checkout leads and its worktrees become children", () => {
+    const cards = groupCards([
+      session({ id: "wt", isWorktree: true, worktreeName: "feat-1" }),
+      session({ id: "main" }),
+    ]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].primary.id).toBe("main");
+    expect(cards[0].children.map((c) => c.id)).toEqual(["wt"]);
+  });
+
+  test("a lone session has no children", () => {
+    const cards = groupCards([session({ id: "solo" })]);
+    expect(cards[0].children).toEqual([]);
+  });
+
+  test("a waiting child is counted so it cannot hide", () => {
+    const cards = groupCards([
+      session({ id: "main" }),
+      session({ id: "wt", isWorktree: true, status: "waiting" }),
+    ]);
+    expect(cards[0].waitingChildren).toBe(1);
   });
 });
