@@ -36,10 +36,6 @@ impl ConfigFile {
         })
     }
 
-    pub fn new(path: PathBuf, text: String) -> ConfigFile {
-        ConfigFile { path, text }
-    }
-
     /// The document as plain JSON, comments stripped.
     pub fn value(&self) -> Result<Value> {
         parse_value(&self.text)
@@ -53,16 +49,16 @@ impl ConfigFile {
             None => bail!("empty json path"),
         };
         let root = self.parse_cst()?;
-        let mut object = root.object_value_or_set();
+        let object = root.object_value_or_set();
         if rest.is_empty() {
-            object.append(first, to_input(value));
+            set_property(&object, first, value);
         } else {
-            let mut cursor = object.object_value_or_set(first);
             let (last, middle) = rest.split_last().expect("rest is non-empty");
+            let mut cursor = object.object_value_or_set(first);
             for key in middle {
                 cursor = cursor.object_value_or_set(key);
             }
-            cursor.append(last, to_input(value));
+            set_property(&cursor, last, value);
         }
         self.text = root.to_string();
         Ok(())
@@ -147,7 +143,7 @@ impl ConfigFile {
                 if let Some(backup) = &backup {
                     let _ = fs::copy(backup, &self.path);
                 }
-                if let Ok(mut f) = fs::OpenOptions::new().append(true).open(&self.path) {
+                if let Ok(f) = fs::OpenOptions::new().append(true).open(&self.path) {
                     let _ = f.sync_all();
                 }
                 bail!("config failed to re-parse after writing, backup restored: {e}");
@@ -161,6 +157,18 @@ impl ConfigFile {
     fn parse_cst(&self) -> Result<CstRootNode> {
         CstRootNode::parse(&self.text, &ParseOptions::default())
             .map_err(|e| anyhow::anyhow!("cannot parse config: {e}"))
+    }
+}
+
+/// Sets a key on an object, replacing the existing property in place when one is already
+/// there. `append` alone would leave a duplicate key behind, which JSONC tolerates but
+/// which no reader agrees on.
+fn set_property(object: &jsonc_parser::cst::CstObject, key: &str, value: Value) {
+    match object.get(key) {
+        Some(prop) => prop.set_value(to_input(value)),
+        None => {
+            object.append(key, to_input(value));
+        }
     }
 }
 
@@ -200,6 +208,11 @@ fn to_input(value: Value) -> CstInputValue {
                 .collect(),
         ),
     }
+}
+
+/// The directory holding the opencode config, where its backups live.
+pub fn backup_dir(home: &str) -> PathBuf {
+    PathBuf::from(home).join(".config/opencode")
 }
 
 /// Backup files in `dir`, newest first, paired with the epoch ms parsed from the name.
@@ -308,6 +321,41 @@ mod tests {
             "https://acme.example/v1"
         );
         assert!(file.text.contains("// keep this comment please"));
+    }
+
+    #[test]
+    fn set_path_replaces_existing_value_without_duplicating_the_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write(tmp.path(), CONFIG);
+        let mut file = ConfigFile::load(&path).unwrap();
+
+        file.set_path(
+            &["provider", "acme", "options", "baseURL"],
+            serde_json::json!("https://one.example/v1"),
+        )
+        .unwrap();
+        file.set_path(
+            &["provider", "acme", "options", "baseURL"],
+            serde_json::json!("https://two.example/v1"),
+        )
+        .unwrap();
+        file.set_path(
+            &["provider", "acme", "options", "baseURL"],
+            serde_json::json!("https://three.example/v1"),
+        )
+        .unwrap();
+
+        let text = file.text.clone();
+        assert_eq!(
+            text.matches("baseURL").count(),
+            2,
+            "each provider must keep exactly one baseURL:\n{text}"
+        );
+        let value = file.value().unwrap();
+        assert_eq!(
+            value["provider"]["acme"]["options"]["baseURL"],
+            "https://three.example/v1"
+        );
     }
 
     #[test]

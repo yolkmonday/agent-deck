@@ -481,9 +481,65 @@ pub fn inline_key(home: &str, provider_id: &str) -> anyhow::Result<Option<String
     Ok(key_from_options(&options, style, header.as_deref()).filter(|k| !is_reference(k)))
 }
 
-/// The path of a provider's key file, for callers that need to touch it.
-pub fn key_file(home: &str, provider_id: &str) -> anyhow::Result<PathBuf> {
-    secrets::key_path(home, provider_id)
+/// The base URL and auth of a provider, resolved for a probe. Returns the key for a
+/// `{file:...}` reference or a literal; the caller must never log it.
+pub fn probe_target(
+    home: &str,
+    provider_id: &str,
+) -> anyhow::Result<(String, String, HeaderStyle, Option<String>)> {
+    let value = ConfigFile::load(
+        &config_path(home).ok_or_else(|| anyhow::anyhow!("no opencode config found"))?,
+    )?
+    .value()?;
+    let provider = value
+        .get("provider")
+        .and_then(|p| p.get(provider_id))
+        .ok_or_else(|| anyhow::anyhow!("unknown provider: {provider_id}"))?;
+
+    let options = provider.get("options").cloned().unwrap_or(Value::Null);
+    let header = custom_header_name(&options).filter(|_| options.get("apiKey").is_none());
+    let style = if header.is_some() {
+        HeaderStyle::Custom
+    } else {
+        HeaderStyle::Bearer
+    };
+    let base_url = options
+        .get("baseURL")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+
+    let raw = key_from_options(&options, style, header.as_deref());
+    // A reference is resolved through the secrets store so the `~` form is read against
+    // `home`; a literal is used as-is (it is a config still waiting to be migrated).
+    let key = match raw {
+        Some(r) if is_reference(&r) => read_referenced_key(home, provider_id, &r),
+        Some(r) => r,
+        None => String::new(),
+    };
+
+    Ok((base_url, key, style, header))
+}
+
+/// Reads the key a `{file:...}` reference points at. Only paths that resolve to the
+/// provider's own secrets file are honoured, so a reference cannot pull in an unrelated
+/// file from the config.
+fn read_referenced_key(home: &str, provider_id: &str, raw: &str) -> String {
+    let inner = raw
+        .trim()
+        .trim_start_matches("{file:")
+        .trim_end_matches('}')
+        .trim();
+    let expected = format!(".config/opencode/secrets/{provider_id}.key");
+    if inner == format!("~/{expected}") || inner.ends_with(&expected) {
+        return secrets::read_key(home, provider_id).unwrap_or_default();
+    }
+    if let Some(rest) = inner.strip_prefix("~/") {
+        return std::fs::read_to_string(PathBuf::from(home).join(rest))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+    }
+    String::new()
 }
 
 #[cfg(test)]
@@ -606,6 +662,26 @@ mod tests {
         assert!(text.contains("{file:~/.config/opencode/secrets/filed.key}"));
         assert!(!text.contains(FILE_KEY));
         assert!(text.contains("// provider list, keep the comments"));
+
+        // The saved provider points at the file; the other provider's inline key is
+        // untouched, so we check the parsed view rather than the whole text.
+        let value = ConfigFile::load(
+            &std::path::PathBuf::from(&home).join(".config/opencode/opencode.jsonc"),
+        )
+        .unwrap()
+        .value()
+        .unwrap();
+        assert_eq!(
+            value["provider"]["filed"]["options"]["apiKey"],
+            "{file:~/.config/opencode/secrets/filed.key}"
+        );
+        assert_eq!(
+            value["provider"]["aki"]["options"]["apiKey"],
+            "sk-inline-9f7e862e2668-secret"
+        );
+
+        // The stored key round-trips through the secrets file, untouched by the edit.
+        assert_eq!(secrets::read_key(&home, "filed").unwrap(), FILE_KEY);
     }
 
     #[test]
@@ -712,6 +788,74 @@ mod tests {
 
         let view = read_overview_with(&home, vec![], vec![], &[]).unwrap();
         assert_eq!(provider(&view.opencode, "aki").auth, "none");
+    }
+
+    #[test]
+    fn probe_target_resolves_the_stored_key() {
+        let (_tmp, home) = setup();
+
+        let (base, key, style, header) = probe_target(&home, "filed").unwrap();
+        assert_eq!(base, "https://filed.example/v1");
+        assert_eq!(key, FILE_KEY);
+        assert_eq!(style, HeaderStyle::Bearer);
+        assert!(header.is_none());
+
+        let (_, key, style, header) = probe_target(&home, "custom").unwrap();
+        assert_eq!(key, "sk-custom-abcdefghijkl");
+        assert_eq!(style, HeaderStyle::Custom);
+        assert_eq!(header.as_deref(), Some("x-api-key"));
+    }
+
+    #[test]
+    fn probe_target_rejects_an_unknown_provider() {
+        let (_tmp, home) = setup();
+        assert!(probe_target(&home, "nope").is_err());
+    }
+
+    #[test]
+    fn inline_key_reports_only_literal_keys() {
+        let (_tmp, home) = setup();
+        assert_eq!(
+            inline_key(&home, "aki").unwrap().as_deref(),
+            Some("sk-inline-9f7e862e2668-secret")
+        );
+        assert!(inline_key(&home, "filed").unwrap().is_none());
+        assert!(inline_key(&home, "nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn migrating_an_inline_key_moves_it_to_the_secrets_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (_tmp, home) = setup();
+        let path = std::path::PathBuf::from(&home).join(".config/opencode/opencode.jsonc");
+
+        // Mirrors what the `secret_migrate_inline` command does, without Tauri state.
+        let key = inline_key(&home, "aki").unwrap().unwrap();
+        crate::secrets::write_key(&home, "aki", &key).unwrap();
+        let mut file = ConfigFile::load(&path).unwrap();
+        file.set_path(
+            &["provider", "aki", "options", "apiKey"],
+            json!(crate::secrets::file_ref(&home, "aki")),
+        )
+        .unwrap();
+        file.save_atomic().unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains(&key), "plaintext key stayed in the config");
+        assert!(text.contains("{file:~/.config/opencode/secrets/aki.key}"));
+
+        let mode = std::fs::metadata(crate::secrets::key_path(&home, "aki").unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(crate::secrets::read_key(&home, "aki").unwrap(), key);
+
+        // After the move the provider no longer reports an inline key.
+        assert!(inline_key(&home, "aki").unwrap().is_none());
+        assert!(provider(&overview(&home).opencode, "aki").key_masked.is_some());
     }
 
     #[test]

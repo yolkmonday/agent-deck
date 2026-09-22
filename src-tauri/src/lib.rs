@@ -603,6 +603,182 @@ fn term_scrollback(id: String, state: State<'_, Arc<AppState>>) -> Result<String
         .scrollback(&id))
 }
 
+fn home_dir() -> String {
+    std::env::var("HOME").unwrap_or_default()
+}
+
+#[tauri::command]
+fn models_overview(state: State<'_, Arc<AppState>>) -> Result<providers::ModelsOverview, String> {
+    let home = home_dir();
+    let (claude_recent, codex_models) = {
+        let store = state.store.lock().map_err(|e| e.to_string())?;
+        (
+            store
+                .distinct_models(Agent::Claude)
+                .map_err(|e| e.to_string())?,
+            store
+                .distinct_models(Agent::Codex)
+                .map_err(|e| e.to_string())?,
+        )
+    };
+    providers::read_overview(&home, claude_recent, codex_models).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn provider_save(
+    provider: providers::OcProviderInput,
+    state: State<'_, Arc<AppState>>,
+) -> Result<providers::OcProvider, String> {
+    let _ = &state;
+    providers::save_provider(&home_dir(), provider).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn provider_delete(id: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let _ = &state;
+    providers::delete_provider(&home_dir(), &id).map_err(|e| e.to_string())
+}
+
+/// Stores a key in its own 0600 file and returns the masked form. The plaintext the user
+/// typed goes straight to disk and is never echoed back.
+#[tauri::command]
+fn secret_set(provider_id: String, key: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    let _ = &state;
+    let home = home_dir();
+    secrets::write_key(&home, &provider_id, &key).map_err(|e| e.to_string())?;
+    Ok(secrets::mask(&key))
+}
+
+#[tauri::command]
+fn secret_clear(provider_id: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let _ = &state;
+    secrets::clear_key(&home_dir(), &provider_id).map_err(|e| e.to_string())
+}
+
+/// The only command that returns a plaintext key. It exists for the eye button in the key
+/// field and must only be invoked from an explicit user action; its result is never
+/// logged, cached or written to disk by the dashboard.
+#[tauri::command]
+fn secret_reveal(provider_id: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    let _ = &state;
+    secrets::read_key(&home_dir(), &provider_id).map_err(|e| e.to_string())
+}
+
+/// Moves a key that is still plaintext in the config into a 0600 file and replaces the
+/// config value with the `{file:...}` reference. Returns the masked form.
+#[tauri::command]
+fn secret_migrate_inline(
+    provider_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let _ = &state;
+    let home = home_dir();
+    let key = providers::inline_key(&home, &provider_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "provider tidak punya key plaintext di config".to_string())?;
+
+    secrets::write_key(&home, &provider_id, &key).map_err(|e| e.to_string())?;
+
+    let mut file = config::ConfigFile::load(
+        &providers::config_path(&home)
+            .ok_or_else(|| "config opencode tidak ditemukan".to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let reference = secrets::file_ref(&home, &provider_id);
+    let base = ["provider", provider_id.as_str(), "options"];
+    let value = file.value().map_err(|e| e.to_string())?;
+    let has_custom_header = value
+        .get("provider")
+        .and_then(|p| p.get(&provider_id))
+        .and_then(|p| p.get("options"))
+        .and_then(|o| o.get("apiKey"))
+        .is_none();
+
+    if has_custom_header {
+        let name = value
+            .get("provider")
+            .and_then(|p| p.get(&provider_id))
+            .and_then(|p| p.get("options"))
+            .and_then(|o| o.get("headers"))
+            .and_then(|h| h.as_object())
+            .and_then(|h| h.keys().next().cloned())
+            .ok_or_else(|| "provider tidak punya header atau apiKey".to_string())?;
+        let mut path = base.to_vec();
+        path.push("headers");
+        path.push(name.as_str());
+        file.set_path(&path, serde_json::json!(reference))
+            .map_err(|e| e.to_string())?;
+    } else {
+        let mut path = base.to_vec();
+        path.push("apiKey");
+        file.set_path(&path, serde_json::json!(reference))
+            .map_err(|e| e.to_string())?;
+    }
+    file.save_atomic().map_err(|e| e.to_string())?;
+
+    Ok(secrets::mask(&key))
+}
+
+#[tauri::command]
+async fn models_fetch(provider_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<String>, String> {
+    let _ = &state;
+    let home = home_dir();
+    let (base_url, key, style, _) =
+        providers::probe_target(&home, &provider_id).map_err(|e| e.to_string())?;
+    probe::fetch_models(&base_url, &key, style)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn model_test(
+    provider_id: String,
+    model: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<probe::ModelTestResult, String> {
+    let _ = &state;
+    let home = home_dir();
+    let (base_url, key, style, _) =
+        providers::probe_target(&home, &provider_id).map_err(|e| e.to_string())?;
+    Ok(probe::test_model(&base_url, &key, style, &model).await)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigBackup {
+    path: String,
+    at_ms: i64,
+}
+
+#[tauri::command]
+fn config_backups(state: State<'_, Arc<AppState>>) -> Result<Vec<ConfigBackup>, String> {
+    let _ = &state;
+    let home = home_dir();
+    let dir = config::backup_dir(&home);
+    Ok(config::backups(&dir)
+        .into_iter()
+        .map(|(path, at_ms)| ConfigBackup {
+            path: path.to_string_lossy().to_string(),
+            at_ms,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn config_restore(path: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let _ = &state;
+    let home = home_dir();
+    let target = providers::config_path(&home)
+        .ok_or_else(|| "config opencode tidak ditemukan".to_string())?;
+    // Only a backup inside the config's own directory may be restored.
+    let backup = std::path::PathBuf::from(&path);
+    let expected_dir = config::backup_dir(&home);
+    if backup.parent() != Some(expected_dir.as_path()) {
+        return Err("path backup tidak dikenal".to_string());
+    }
+    config::restore(&backup, &target).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -883,7 +1059,18 @@ pub fn run() {
             term_write,
             term_resize,
             term_kill,
-            term_scrollback
+            term_scrollback,
+            models_overview,
+            provider_save,
+            provider_delete,
+            secret_set,
+            secret_clear,
+            secret_reveal,
+            secret_migrate_inline,
+            models_fetch,
+            model_test,
+            config_backups,
+            config_restore
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

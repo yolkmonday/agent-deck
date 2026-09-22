@@ -113,7 +113,7 @@ async fn attempt(
     model: &str,
 ) -> ModelTestResult {
     let started = Instant::now();
-    let mut used_header = header;
+    let used_header = header;
 
     let client = match reqwest::Client::builder().timeout(PROBE_TIMEOUT).build() {
         Ok(c) => c,
