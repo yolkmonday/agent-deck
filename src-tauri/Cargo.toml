@@ -26,6 +26,7 @@ collector = { path = "crates/collector" }
 dirs = "5"
 portable-pty = "0.9"
 anyhow = "1"
+jsonc-parser = { version = "0.26", features = ["cst", "serde"] }
 
 [dev-dependencies]
 tempfile = "3"
