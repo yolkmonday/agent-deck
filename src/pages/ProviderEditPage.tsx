@@ -3,6 +3,7 @@ import { ArrowLeft, Check, History, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { KeyField } from "@/components/KeyField";
 import { ModelList } from "@/components/ModelList";
+import { ProviderIcon } from "@/components/BrandIcon";
 import type { HeaderStyle, OcModel, OcProviderInput } from "@/lib/api";
 import { configBackups, configRestore, modelsOverview, secretMigrateInline } from "@/lib/api";
 import { providerDelete, providerSave } from "@/lib/api";
@@ -220,11 +221,14 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
-        <div className="flex flex-col gap-0.75">
-          <h1 className="text-[22px] font-semibold">{creating ? "Provider baru" : draft.name || draft.id}</h1>
-          <span className="text-[12.5px] text-fg-2">
-            Ditulis ke config global opencode lewat file sementara dan backup.
-          </span>
+        <div className="flex items-center gap-3">
+          <ProviderIcon providerId={creating ? draft.id : (providerId ?? draft.id)} size={28} />
+          <div className="flex flex-col gap-0.75">
+            <h1 className="text-[22px] font-semibold">{creating ? "Provider baru" : draft.name || draft.id}</h1>
+            <span className="text-[12.5px] text-fg-2">
+              Ditulis ke config global opencode lewat file sementara dan backup.
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {!creating && (

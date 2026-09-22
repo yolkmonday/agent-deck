@@ -1,4 +1,5 @@
 import { CircleCheck, History } from "lucide-react";
+import { ModelIcon } from "@/components/BrandIcon";
 
 interface ModelChipsProps {
   available: string[];
@@ -18,8 +19,9 @@ export const ModelChips = ({ available, recentlyUsed }: ModelChipsProps) => {
           {available.map((m) => (
             <span
               key={m}
-              className="rounded-md border border-border bg-surface px-2.5 py-1 font-mono text-[12px] text-fg"
+              className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-mono text-[12px] text-fg"
             >
+              <ModelIcon model={m} size={13} />
               {m}
             </span>
           ))}
@@ -37,12 +39,13 @@ export const ModelChips = ({ available, recentlyUsed }: ModelChipsProps) => {
             {recentlyUsed.map((m) => (
               <span
                 key={m}
-                className={`rounded-md border px-2.5 py-1 font-mono text-[12px] ${
+                className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[12px] ${
                   used.has(m) && available.includes(m)
                     ? "border-border bg-surface-2 text-fg-2"
                     : "border-border/60 text-fg-3"
                 }`}
               >
+                <ModelIcon model={m} size={13} />
                 {m}
               </span>
             ))}

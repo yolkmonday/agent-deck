@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
+import { AgentIcon, ModelIcon } from "@/components/BrandIcon";
 import { ModelChips } from "@/components/ModelChips";
 import { ProviderTable } from "@/components/ProviderTable";
 import { modelsOverview } from "@/lib/api";
@@ -43,7 +44,7 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
           <>
             <section className="flex flex-col gap-3">
               <div className="flex items-center gap-2">
-                <span className="size-2 rounded-full bg-claude" />
+                <AgentIcon agent="claude" size={16} className="text-claude" />
                 <span className="text-sm font-semibold">Claude</span>
               </div>
               <div className="rounded-[10px] border border-border bg-surface px-5 py-4">
@@ -57,7 +58,7 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="size-2 rounded-full bg-opencode" />
+                  <AgentIcon agent="opencode" size={16} className="text-opencode" />
                   <span className="text-sm font-semibold">opencode</span>
                 </div>
                 <span className="text-xs text-fg-3">
@@ -71,7 +72,7 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
 
             <section className="flex flex-col gap-3">
               <div className="flex items-center gap-2">
-                <span className="size-2 rounded-full bg-codex" />
+                <AgentIcon agent="codex" size={16} className="text-codex" />
                 <span className="text-sm font-semibold">Codex</span>
               </div>
               <div className="flex flex-col gap-2 rounded-[10px] border border-border bg-surface px-5 py-4">
@@ -82,8 +83,9 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
                     {query.data.codex.models.map((m) => (
                       <span
                         key={m}
-                        className="rounded-md border border-border bg-surface-2 px-2.5 py-1 font-mono text-[12px] text-fg"
+                        className="flex items-center gap-1.5 rounded-md border border-border bg-surface-2 px-2.5 py-1 font-mono text-[12px] text-fg"
                       >
+                        <ModelIcon model={m} size={13} />
                         {m}
                       </span>
                     ))}

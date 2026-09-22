@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ChevronRight } from "lucide-react";
+import { ProviderIcon } from "@/components/BrandIcon";
 import type { OcAuth, OcProvider } from "@/lib/api";
 import { secretMigrateInline } from "@/lib/api";
 
@@ -66,9 +67,12 @@ export const ProviderTable = ({
                 className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-surface-2"
               >
                 <td className="py-3 pr-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[13px] font-medium text-fg">{p.name}</span>
-                    <span className="font-mono text-[11.5px] text-fg-3">{p.id}</span>
+                  <div className="flex items-center gap-2.5">
+                    <ProviderIcon providerId={p.id} size={20} />
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[13px] font-medium text-fg">{p.name}</span>
+                      <span className="font-mono text-[11.5px] text-fg-3">{p.id}</span>
+                    </div>
                   </div>
                 </td>
                 <td className="py-3 pr-4">

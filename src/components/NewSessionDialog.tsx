@@ -1,12 +1,23 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { AgentIcon } from "@/components/BrandIcon";
 import type { Project, TermProfile } from "@/lib/api";
 import { projectTouch, projectsList, termProfiles } from "@/lib/api";
 import { useNavigate } from "@/lib/nav";
 import { useLive } from "@/store/live";
 import { useTerminal } from "@/store/terminal";
 
-const AGENT_DOT = { claude: "bg-claude", opencode: "bg-opencode", codex: "bg-codex" } as const;
+const AGENT_TEXT = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
+
+const isAgent = (id: string): id is "claude" | "opencode" | "codex" => id in AGENT_TEXT;
+
+const agentOf = (profileId: string): "claude" | "opencode" | "codex" =>
+  isAgent(profileId) ? profileId : "opencode";
+
+const ProjectIcon = ({ defaultProfile }: { defaultProfile: string | null }) => {
+  const agent = agentOf(defaultProfile ?? "");
+  return <AgentIcon agent={agent} size={14} className={AGENT_TEXT[agent]} />;
+};
 
 const displayCommand = (profile: TermProfile) =>
   `${profile.program}${profile.args.length > 0 ? ` ${profile.args.join(" ")}` : ""}`;
@@ -121,7 +132,6 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
             ) : (
               saved.map((p) => {
                 const active = !freeSelected && p.id === projectId;
-                const agent = AGENT_DOT[p.defaultProfile as keyof typeof AGENT_DOT] ?? "bg-idle";
                 return (
                   <button
                     key={p.id}
@@ -132,7 +142,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
                       active ? "border-busy/50 bg-surface-2 font-semibold" : "border-border"
                     } ${p.exists ? "cursor-pointer" : "cursor-default opacity-45"}`}
                   >
-                    <span className={`size-2 rounded-full ${agent}`} />
+                    <ProjectIcon defaultProfile={p.defaultProfile} />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="truncate">{p.name}</span>
                       <span className="truncate font-mono text-[11.5px] font-normal text-fg-3">
@@ -162,7 +172,11 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
                   p.id === profileId ? "border-busy/50 bg-surface-2 font-semibold" : "border-border"
                 } ${p.available ? "cursor-pointer" : "cursor-default opacity-45"}`}
               >
-                <span className={`size-2 rounded-full ${AGENT_DOT[p.id as keyof typeof AGENT_DOT] ?? "bg-idle"}`} />
+                <AgentIcon
+                  agent={agentOf(p.id)}
+                  size={14}
+                  className={isAgent(p.id) ? AGENT_TEXT[p.id] : undefined}
+                />
                 <span className="flex-1">{p.label}</span>
                 <span className="font-mono text-[11.5px] text-fg-3">
                   {p.available ? p.program : "Tidak ditemukan di PATH"}

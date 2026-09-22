@@ -1,8 +1,9 @@
 import { X } from "lucide-react";
+import { AgentIcon } from "@/components/BrandIcon";
 import type { TermSession } from "@/lib/api";
 import { useTerminal } from "@/store/terminal";
 
-const AGENT_DOT = { claude: "bg-claude", opencode: "bg-opencode", codex: "bg-codex" } as const;
+const AGENT_TEXT = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 
 export const TerminalTabs = ({ onClose }: { onClose: (id: string) => void }) => {
   const sessions = useTerminal((s) => s.sessions);
@@ -18,7 +19,11 @@ export const TerminalTabs = ({ onClose }: { onClose: (id: string) => void }) => 
           }`}
         >
           <button type="button" onClick={() => select(s.id)} className="flex cursor-pointer items-center gap-2">
-            <span className={`size-1.75 rounded-full ${AGENT_DOT[s.profileId as keyof typeof AGENT_DOT] ?? "bg-idle"}`} />
+            <AgentIcon
+              agent={(s.profileId as keyof typeof AGENT_TEXT) in AGENT_TEXT ? (s.profileId as "claude" | "opencode" | "codex") : "claude"}
+              size={14}
+              className={AGENT_TEXT[s.profileId as keyof typeof AGENT_TEXT]}
+            />
             <span className="max-w-40 truncate">{s.label}</span>
             <span className={`size-1.5 rounded-full ${s.alive ? "bg-ok" : "bg-idle"}`} />
           </button>
