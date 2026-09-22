@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { BillingDialog } from "@/components/BillingDialog";
 import { ModelTable } from "@/components/ModelTable";
+import { MonthlySummary } from "@/components/MonthlySummary";
 import { PricingDialog } from "@/components/PricingDialog";
 import { RangeFilter } from "@/components/RangeFilter";
 import { TokenChart } from "@/components/TokenChart";
@@ -19,6 +21,7 @@ const Kpi = ({ label, value, sub, tone = "text-fg" }: { label: string; value: st
 export const TokenPage = () => {
   const [days, setDays] = useState(7);
   const [pricing, setPricing] = useState(false);
+  const [billing, setBilling] = useState(false);
   const totals = useQuery({ queryKey: ["history", "totals", days], queryFn: () => historyTotals(days) });
   const daily = useQuery({ queryKey: ["history", "daily", days], queryFn: () => historyDaily(days) });
   const models = useQuery({ queryKey: ["history", "models", days], queryFn: () => historyByModel(days) });
@@ -42,6 +45,13 @@ export const TokenPage = () => {
           <RangeFilter value={days} onChange={setDays} />
           <button
             type="button"
+            onClick={() => setBilling(true)}
+            className="cursor-pointer rounded-lg border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
+          >
+            Langganan &amp; saldo
+          </button>
+          <button
+            type="button"
             onClick={() => setPricing(true)}
             className="cursor-pointer rounded-lg border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
           >
@@ -50,7 +60,9 @@ export const TokenPage = () => {
         </div>
       </header>
       {pricing && <PricingDialog onClose={() => setPricing(false)} />}
+      {billing && <BillingDialog onClose={() => setBilling(false)} />}
       <main className="flex min-w-0 flex-1 flex-col gap-6.5 overflow-y-auto px-7 pb-7">
+        <MonthlySummary />
         <div className="flex">
           <Kpi label="Total token" value={formatTokens(t ? t.tokens.input + t.tokens.output + t.tokens.cacheRead + t.tokens.cacheWrite : 0)} sub={`${t?.messages ?? 0} pesan`} />
           <Kpi label="Estimasi biaya" value={formatUsd(t?.costUsd ?? 0)} sub="berdasarkan tabel harga" />

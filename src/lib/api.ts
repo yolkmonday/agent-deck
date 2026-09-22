@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Agent, TokenUsage } from "@/lib/types";
+import type { Agent, BillingMode, TokenUsage } from "@/lib/types";
 
 export interface IndexStatus {
   indexedFiles: number;
@@ -89,6 +89,40 @@ export interface SavingsSummary {
   leanCtx: SavingsSource;
   daily: SavingsDay[];
   topCommands: SavingsCommand[];
+  warnings: string[];
+}
+
+export interface BillingAccount {
+  id: string;
+  label: string;
+  mode: BillingMode;
+  matches: string[];
+  monthlyUsd: number | null;
+  renewalDay: number | null;
+  creditUsd: number | null;
+  startedOn: string | null;
+  expiresOn: string | null;
+}
+
+export interface AccountPeriod {
+  accountId: string;
+  label: string;
+  mode: BillingMode;
+  fromDate: string;
+  toDate: string;
+  tokens: TokenUsage;
+  spendUsd: number;
+  notionalUsd: number;
+  committedUsd: number | null;
+  creditLeftUsd: number | null;
+  daysLeft: number | null;
+  expired: boolean;
+}
+
+export interface BillingSummary {
+  periods: AccountPeriod[];
+  totalSpendUsd: number;
+  totalNotionalUsd: number;
   warnings: string[];
 }
 
@@ -253,6 +287,10 @@ export const historyByProject = (days: number) => invoke<ProjectRow[]>("history_
 export const historyTotals = (days: number) => invoke<Totals>("history_totals", { days });
 export const pricingGet = () => invoke<PriceEntry[]>("pricing_get");
 export const pricingSet = (entries: PriceEntry[]) => invoke<PriceEntry[]>("pricing_set", { entries });
+export const billingAccounts = () => invoke<BillingAccount[]>("billing_accounts");
+export const billingSave = (accounts: BillingAccount[]) =>
+  invoke<BillingAccount[]>("billing_save", { accounts });
+export const billingSummary = () => invoke<BillingSummary>("billing_summary", {});
 export const timelineSpans = (fromMs: number, toMs: number) =>
   invoke<TimelineLane[]>("timeline_spans", { fromMs, toMs });
 export const savingsSummary = (days: number) => invoke<SavingsSummary>("savings_summary", { days });

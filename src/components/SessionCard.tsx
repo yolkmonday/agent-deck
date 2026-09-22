@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 import { AgentIcon } from "@/components/BrandIcon";
 import { ClaudeThinking } from "@/components/brainless/claude/claude-thinking";
-import { formatUsd } from "@/lib/cost";
+import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
 import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session, SubAgent } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
@@ -199,12 +199,18 @@ export const SessionCard = ({
       <div className="mt-auto flex flex-col gap-2">
         <div className="flex items-center gap-3 font-mono text-[11.5px] whitespace-nowrap">
           <span className="text-fg-2">{formatTokens(totalTokens(s.tokens))}</span>
-          {s.priced ? (
-            <span className="text-fg-2">{formatUsd(s.costUsd)}</span>
-          ) : (
+          {!s.priced ? (
             <span className="text-fg-3" title="Model ini belum ada di tabel harga.">
               -
             </span>
+          ) : s.billingMode === "subscription" ? (
+            // A subscription's tokens cost nothing extra, so the figure is an
+            // estimate at API rates and must never read like a bill.
+            <span className="text-fg-3" title={NOTIONAL_HINT}>
+              {formatNotional(s.costUsd)}
+            </span>
+          ) : (
+            <span className="text-fg-2">{formatUsd(s.costUsd)}</span>
           )}
         </div>
         <div className="flex items-center justify-between gap-2">

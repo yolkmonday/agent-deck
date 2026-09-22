@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DailyRow } from "@/lib/api";
-import { formatPct, formatUsd, stackByDate } from "@/lib/cost";
+import { formatNotional, formatPct, formatUsd, NOTIONAL_HINT, stackByDate } from "@/lib/cost";
 
 const usage = (input: number, output: number, cacheRead = 0, cacheWrite = 0, reasoning = 0) => ({
   input,
@@ -27,6 +27,17 @@ describe("formatPct", () => {
   test("rounds to a whole number", () => {
     expect(formatPct(87.4)).toBe("87%");
     expect(formatPct(0)).toBe("0%");
+  });
+});
+
+describe("formatNotional", () => {
+  test("always carries the approximation marker", () => {
+    expect(formatNotional(806.42)).toBe("≈ $806,42");
+    expect(formatNotional(0)).toBe("≈ $0,00");
+    expect(formatNotional(0.004)).toBe("≈ <$0,01");
+  });
+  test("the tooltip says the figure does not add to the bill", () => {
+    expect(NOTIONAL_HINT).toBe("Perkiraan kalau dibayar per token. Tidak menambah tagihan.");
   });
 });
 
