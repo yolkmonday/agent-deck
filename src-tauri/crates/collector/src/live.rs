@@ -4,6 +4,7 @@ use crate::model::{Activity, ActivityKind, Agent, LiveSnapshot, Orphan, Session,
 use crate::opencode::{read_active, running_dirs, OpencodeLive};
 use crate::process::ProcessTable;
 use crate::pricing::PriceTable;
+use crate::subagent::{self, SubAgent, SubAgentMeta};
 use crate::transcript::{find_transcript, TranscriptState};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -44,6 +45,12 @@ pub struct LiveCollector {
     paths: Paths,
     procs: Arc<dyn ProcessTable>,
     transcripts: HashMap<(String, String), (PathBuf, TranscriptState)>,
+    /// Keyed by (session id + cwd, agent id) so two sessions that share an id in
+    /// different directories tail separate files.
+    subagents: HashMap<(String, String), (PathBuf, TranscriptState)>,
+    /// `meta.json` is tiny but parsed on every pass otherwise; the mtime decides
+    /// whether a re-read is needed at all.
+    meta_cache: HashMap<PathBuf, (i64, SubAgentMeta)>,
 }
 
 fn claude_activity(c: &ClaudeLive, st: &TranscriptState) -> Option<Activity> {
@@ -90,6 +97,7 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds
     let tool_running_ms = o.running_tool.as_ref().and(o.tool_started_ms).map(|t| (now_ms - t).max(0));
     let tool = o.running_tool.as_deref().zip(tool_running_ms);
     let (health, health_reason) = health::evaluate(o.status, quiet_ms, tool, thresholds);
+    let own_tokens = o.tokens.clone();
     Session {
         id: o.id,
         agent: Agent::Opencode,
@@ -100,7 +108,9 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds
         branch: None,
         status: o.status,
         activity,
-        tokens: o.tokens,
+        tokens: own_tokens.clone(),
+        own_tokens,
+        subagents: Vec::new(),
         cost_usd,
         priced,
         started_at_ms: None,
@@ -114,7 +124,7 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds
 
 impl LiveCollector {
     pub fn new(paths: Paths, procs: Arc<dyn ProcessTable>) -> Self {
-        Self { paths, procs, transcripts: HashMap::new() }
+        Self { paths, procs, transcripts: HashMap::new(), subagents: HashMap::new(), meta_cache: HashMap::new() }
     }
 
     fn claude_session(&mut self, c: ClaudeLive, prices: &PriceTable, thresholds: &Thresholds, now_ms: i64) -> Session {
@@ -131,20 +141,35 @@ impl LiveCollector {
         if !path.as_os_str().is_empty() {
             let _ = state.advance(path);
         }
-        let priced = state.model.as_deref().is_some_and(|m| prices.matches(m));
-        let cost_usd = match state.model.as_deref() {
-            Some(m) if priced => prices.cost_usd(m, &state.tokens),
+        let model = state.model.clone();
+        let branch = state.branch.clone();
+        let last_record_ms = state.last_record_ms;
+        let pending_tool_id = state.pending_tool_id.clone();
+        let tool_started_ms = state.tool_started_ms;
+        let last_tool = state.last_tool.clone();
+        let parent_path = path.clone();
+        let agents_done = state.agents_done.clone();
+        let activity = claude_activity(&c, state);
+
+        let priced = model.as_deref().is_some_and(|m| prices.matches(m));
+        let own_tokens = state.tokens.clone();
+        let own_cost = match model.as_deref() {
+            Some(m) if priced => prices.cost_usd(m, &own_tokens),
             _ => 0.0,
         };
+        let subagents =
+            self.running_subagents(&c.session_id, &c.cwd, &parent_path, &agents_done, prices);
+        let mut tokens = own_tokens.clone();
+        let mut cost_usd = own_cost;
+        for s in &subagents {
+            tokens.add(&s.tokens);
+            cost_usd += s.cost_usd;
+        }
         // A transcript record is the better signal when there is one; the session
         // file's stamp is only a fallback for a session that never wrote one.
-        let quiet_ms = (now_ms - state.last_record_ms.unwrap_or(c.updated_at_ms)).max(0);
-        let tool_running_ms = state
-            .pending_tool_id
-            .as_ref()
-            .and(state.tool_started_ms)
-            .map(|t| (now_ms - t).max(0));
-        let tool = state.last_tool.as_ref().map(|t| t.name.as_str()).zip(tool_running_ms);
+        let quiet_ms = (now_ms - last_record_ms.unwrap_or(c.updated_at_ms)).max(0);
+        let tool_running_ms = pending_tool_id.as_ref().and(tool_started_ms).map(|t| (now_ms - t).max(0));
+        let tool = last_tool.as_ref().map(|t| t.name.as_str()).zip(tool_running_ms);
         let (health, health_reason) = health::evaluate(c.status, quiet_ms, tool, thresholds);
         Session {
             id: c.session_id.clone(),
@@ -152,11 +177,13 @@ impl LiveCollector {
             pid: Some(c.pid),
             project: project_name(&c.cwd, &self.paths.home),
             cwd: c.cwd.clone(),
-            model: state.model.clone(),
-            branch: state.branch.clone(),
+            model,
+            branch,
             status: c.status,
-            activity: claude_activity(&c, state),
-            tokens: state.tokens.clone(),
+            activity,
+            tokens,
+            own_tokens,
+            subagents,
             cost_usd,
             priced,
             started_at_ms: c.started_at_ms,
@@ -168,6 +195,88 @@ impl LiveCollector {
         }
     }
 
+    fn session_subagents_dir(&self, session_id: &str, cwd: &str) -> PathBuf {
+        let encoded = crate::transcript::encode_cwd(cwd);
+        self.paths.claude_projects.join(encoded).join(session_id).join("subagents")
+    }
+
+    /// The subagents a session is still running, newest first. A parent
+    /// transcript names each agent whose result has landed, so anything left in
+    /// `subagents/` that is not in `agents_done` is still in flight.
+    fn running_subagents(
+        &mut self,
+        session_id: &str,
+        cwd: &str,
+        parent_path: &PathBuf,
+        agents_done: &HashSet<String>,
+        prices: &PriceTable,
+    ) -> Vec<SubAgent> {
+        if parent_path.as_os_str().is_empty() {
+            return Vec::new();
+        }
+        let session_dir = parent_path.with_extension("");
+        let mut out: Vec<SubAgent> = Vec::new();
+        for entry in subagent::scan(&session_dir) {
+            if agents_done.contains(&entry.id) {
+                continue;
+            }
+            let key = (format!("{session_id}|{cwd}"), entry.id.clone());
+            let (_, state) = self
+                .subagents
+                .entry(key)
+                .or_insert_with(|| (entry.jsonl.clone(), TranscriptState::default()));
+            let _ = state.advance(&entry.jsonl);
+            let tokens = state.tokens.clone();
+            let transcript_model = state.model.clone();
+            let started_ms = state.started_ms;
+            let meta = self.read_meta_cached(&entry.meta_path);
+            let model = meta.model.clone().or(transcript_model);
+            let priced = model.as_deref().is_some_and(|m| prices.matches(m));
+            let cost_usd = match model.as_deref() {
+                Some(m) if priced => prices.cost_usd(m, &tokens),
+                _ => 0.0,
+            };
+            out.push(SubAgent {
+                id: entry.id,
+                agent_type: meta.agent_type,
+                description: meta.description,
+                model,
+                tokens,
+                cost_usd,
+                priced,
+                started_ms,
+            });
+        }
+        out.sort_by(|a, b| match (a.started_ms, b.started_ms) {
+            (Some(x), Some(y)) => y.cmp(&x),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => b.id.cmp(&a.id),
+        });
+        out
+    }
+
+    fn read_meta_cached(&mut self, path: &std::path::Path) -> SubAgentMeta {
+        let mtime = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64);
+        let key = path.to_path_buf();
+        if let Some((cached_mtime, meta)) = self.meta_cache.get(&key) {
+            if Some(*cached_mtime) == mtime {
+                return meta.clone();
+            }
+        }
+        let meta = subagent::read_meta(path).unwrap_or(SubAgentMeta {
+            agent_type: String::new(),
+            description: String::new(),
+            model: None,
+        });
+        self.meta_cache.insert(key, (mtime.unwrap_or(-1), meta.clone()));
+        meta
+    }
+
     pub fn snapshot(&mut self, now_ms: i64, prices: &PriceTable, thresholds: &Thresholds) -> LiveSnapshot {
         let mut sessions = Vec::new();
         let mut warnings = Vec::new();
@@ -176,6 +285,12 @@ impl LiveCollector {
         let live_ids: HashSet<(String, String)> =
             claude.iter().map(|c| (c.session_id.clone(), c.cwd.clone())).collect();
         self.transcripts.retain(|key, _| live_ids.contains(key));
+        let live_prefixes: Vec<String> =
+            live_ids.iter().map(|(sid, cwd)| format!("{sid}|{cwd}")).collect();
+        self.subagents.retain(|(prefix, _), _| live_prefixes.iter().any(|p| p == prefix));
+        let live_metas: HashSet<PathBuf> =
+            live_ids.iter().map(|(sid, cwd)| self.session_subagents_dir(sid, cwd)).collect();
+        self.meta_cache.retain(|path, _| live_metas.contains(path.parent().unwrap_or(path)));
         for c in claude {
             sessions.push(self.claude_session(c, prices, thresholds, now_ms));
         }
@@ -565,6 +680,205 @@ mod tests {
         assert_eq!(o.cwd, "/x/y");
         assert_eq!(o.agent, Agent::Opencode);
         assert_eq!(o.age_ms, 600_000);
+    }
+
+    const CWD: &str = "/Users/yolk/Dev/kirimi";
+
+    /// Writes a subagent transcript plus its meta beside the parent's, which is
+    /// how Claude lays them out: `subagents/agent-<id>.{jsonl,meta.json}`.
+    fn subagent_files(
+        paths: &Paths,
+        cwd: &str,
+        sid: &str,
+        id: &str,
+        meta: &str,
+        body: &str,
+    ) -> std::path::PathBuf {
+        let dir = paths
+            .claude_projects
+            .join(cwd.replace('/', "-"))
+            .join(sid)
+            .join("subagents");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("agent-{id}.meta.json")), meta).unwrap();
+        let jsonl = dir.join(format!("agent-{id}.jsonl"));
+        fs::write(&jsonl, format!("{body}\n")).unwrap();
+        jsonl
+    }
+
+    fn parent_transcript(paths: &Paths, cwd: &str, sid: &str, body: &str) {
+        let dir = paths.claude_projects.join(cwd.replace('/', "-"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{sid}.jsonl")), format!("{body}\n")).unwrap();
+    }
+
+    const SCOUT_META: &str = r#"{"agentType":"scout","description":"Find icon names","model":"claude-sonnet-5","spawnDepth":1}"#;
+
+    #[test]
+    fn running_subagents_appear_on_the_parent() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", CWD, "busy", 10);
+        parent_transcript(
+            &paths,
+            CWD,
+            "s1",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":10}}}",
+        );
+        subagent_files(
+            &paths,
+            CWD,
+            "s1",
+            "a1",
+            SCOUT_META,
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"sa1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":5}}}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
+        let subs = &snap.sessions[0].subagents;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].id, "a1");
+        assert_eq!(subs[0].agent_type, "scout");
+        assert_eq!(subs[0].description, "Find icon names");
+        assert_eq!(subs[0].model.as_deref(), Some("claude-sonnet-5"));
+    }
+
+    #[test]
+    fn finished_subagents_are_hidden() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", CWD, "busy", 10);
+        parent_transcript(
+            &paths,
+            CWD,
+            "s1",
+            &assistant_at(10_000, "\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":10}"),
+        );
+        append_line(
+            &paths.claude_projects.join(CWD.replace('/', "-")).join("s1.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\"}]},\"toolUseResult\":{\"agentId\":\"a1\",\"status\":\"completed\"}}",
+        );
+        subagent_files(
+            &paths,
+            CWD,
+            "s1",
+            "a1",
+            SCOUT_META,
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"sa1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":5}}}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
+        assert!(snap.sessions[0].subagents.is_empty());
+        assert_eq!(snap.sessions[0].tokens.output, 10, "a finished agent is not folded in");
+    }
+
+    #[test]
+    fn subagent_tokens_are_added_to_the_parent() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", CWD, "busy", 10);
+        parent_transcript(
+            &paths,
+            CWD,
+            "s1",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":10}}}",
+        );
+        subagent_files(
+            &paths,
+            CWD,
+            "s1",
+            "a1",
+            SCOUT_META,
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"sa1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":5}}}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let s = &c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0];
+        assert_eq!(s.tokens.output, 15);
+        assert_eq!(s.own_tokens.output, 10);
+        assert_eq!(s.subagents[0].tokens.output, 5);
+    }
+
+    #[test]
+    fn subagent_cost_is_added_to_the_parent() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", CWD, "busy", 10);
+        parent_transcript(
+            &paths,
+            CWD,
+            "s1",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":1000}}}",
+        );
+        subagent_files(
+            &paths,
+            CWD,
+            "s1",
+            "a1",
+            SCOUT_META,
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"sa1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":2000}}}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let prices = PriceTable::defaults();
+        let s = &c.snapshot(20, &prices, &Thresholds::defaults()).sessions[0];
+        let own = prices.cost_usd("claude-sonnet-5", &s.own_tokens);
+        let sub = s.subagents[0].cost_usd;
+        assert!(sub > 0.0);
+        assert!(close(s.cost_usd, own + sub));
+        assert!(s.priced);
+        assert!(s.subagents[0].priced);
+    }
+
+    #[test]
+    fn a_session_without_a_subagent_directory_has_an_empty_list() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", CWD, "busy", 10);
+        parent_transcript(
+            &paths,
+            CWD,
+            "s1",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":10}}}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let s = &c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0];
+        assert!(s.subagents.is_empty());
+        assert_eq!(s.tokens.output, 10);
+        assert_eq!(s.own_tokens.output, 10);
+    }
+
+    #[test]
+    fn subagents_sort_newest_first() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", CWD, "busy", 10);
+        parent_transcript(
+            &paths,
+            CWD,
+            "s1",
+            &assistant_at(10_000, "\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":1}"),
+        );
+        subagent_files(
+            &paths,
+            CWD,
+            "s1",
+            "old",
+            SCOUT_META,
+            &assistant_at(20_000, "\"id\":\"sa-old\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":1}"),
+        );
+        subagent_files(
+            &paths,
+            CWD,
+            "s1",
+            "new",
+            SCOUT_META,
+            &assistant_at(90_000, "\"id\":\"sa-new\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":1}"),
+        );
+        let mut c = collector(paths, &[1]);
+
+        let subs = &c.snapshot(100_000, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0].subagents;
+        let ids: Vec<&str> = subs.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["new", "old"]);
+        assert_eq!(subs[0].started_ms, Some(90_000));
+        assert_eq!(subs[1].started_ms, Some(20_000));
     }
 
     #[test]

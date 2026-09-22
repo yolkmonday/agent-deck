@@ -35,6 +35,9 @@ pub struct TranscriptState {
     /// Agent ids whose result has landed in this transcript. A subagent listed
     /// here has finished; anything else in `subagents/` may still be running.
     pub agents_done: HashSet<String>,
+    /// Timestamp of the very first record this tailer ever parsed, so a
+    /// subagent can be ordered by when it was spawned.
+    pub started_ms: Option<i64>,
 }
 
 pub fn encode_cwd(cwd: &str) -> String {
@@ -128,6 +131,9 @@ impl TranscriptState {
             other => other.as_i64(),
         }) {
             self.last_record_ms = Some(ts);
+            if self.started_ms.is_none() {
+                self.started_ms = Some(ts);
+            }
         }
         match v.get("type").and_then(Value::as_str) {
             Some("assistant") => self.apply_assistant(v),
