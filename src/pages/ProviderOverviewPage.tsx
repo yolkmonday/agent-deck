@@ -1,0 +1,91 @@
+import { useQuery } from "@tanstack/react-query";
+import { ModelChips } from "@/components/ModelChips";
+import { ProviderTable } from "@/components/ProviderTable";
+import { modelsOverview } from "@/lib/api";
+import { useNavigate } from "@/lib/nav";
+
+export const ProviderOverviewPage = () => {
+  const open = useNavigate();
+  const query = useQuery({ queryKey: ["models-overview"], queryFn: modelsOverview });
+
+  return (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <header className="flex items-center justify-between px-7 py-4.5">
+        <div className="flex flex-col gap-0.75">
+          <h1 className="text-[22px] font-semibold">Model &amp; Provider</h1>
+          <span className="text-[12.5px] text-fg-2">
+            Model tiap agent dan provider opencode yang terpasang. Klik provider untuk mengelola.
+          </span>
+        </div>
+      </header>
+
+      <main className="flex min-w-0 flex-1 flex-col gap-6.5 overflow-y-auto px-7 pb-7">
+        {query.isError && (
+          <div className="rounded-md border border-err/40 bg-err/10 px-3 py-2 font-mono text-xs text-err">
+            {String(query.error)}
+          </div>
+        )}
+
+        {query.isPending && (
+          <div className="flex h-64 items-center justify-center text-sm text-fg-3">Memuat provider…</div>
+        )}
+
+        {query.data && (
+          <>
+            <section className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <span className="size-2 rounded-full bg-claude" />
+                <span className="text-sm font-semibold">Claude</span>
+              </div>
+              <div className="rounded-[10px] border border-border bg-surface px-5 py-4">
+                <ModelChips
+                  available={query.data.claude.models}
+                  recentlyUsed={query.data.claude.recentlyUsed}
+                />
+              </div>
+            </section>
+
+            <section className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="size-2 rounded-full bg-opencode" />
+                  <span className="text-sm font-semibold">opencode</span>
+                </div>
+                <span className="text-xs text-fg-3">
+                  Config global. Config project ditampilkan tapi belum bisa diedit.
+                </span>
+              </div>
+              <div className="rounded-[10px] border border-border bg-surface px-5 py-4">
+                <ProviderTable providers={query.data.opencode} onOpen={open.provider} />
+              </div>
+            </section>
+
+            <section className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <span className="size-2 rounded-full bg-codex" />
+                <span className="text-sm font-semibold">Codex</span>
+              </div>
+              <div className="flex flex-col gap-2 rounded-[10px] border border-border bg-surface px-5 py-4">
+                {query.data.codex.models.length === 0 ? (
+                  <span className="text-xs text-fg-3">Belum ada model Codex di riwayat.</span>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {query.data.codex.models.map((m) => (
+                      <span
+                        key={m}
+                        className="rounded-md border border-border bg-surface-2 px-2.5 py-1 font-mono text-[12px] text-fg"
+                      >
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <span className="text-[11.5px] text-fg-3">{query.data.codex.note}</span>
+              </div>
+            </section>
+          </>
+        )}
+      </main>
+    </div>
+  );
+};

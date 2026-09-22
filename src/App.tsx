@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import type { PageKey } from "@/lib/nav";
+import { NavProvider, type PageKey } from "@/lib/nav";
 import { LivePage } from "@/pages/LivePage";
+import { ProviderOverviewPage } from "@/pages/ProviderOverviewPage";
 import { SavingsPage } from "@/pages/SavingsPage";
 import { TerminalPage } from "@/pages/TerminalPage";
 import { TimelinePage } from "@/pages/TimelinePage";
@@ -27,21 +28,32 @@ const App = () => {
     };
   }, []);
 
+  const nav = useMemo(
+    () => ({
+      provider: (_id: string) => {
+        setPage("provider");
+      },
+    }),
+    [],
+  );
+
   const goToTerminal = (sessionId?: string) => {
     setTerminalTarget(sessionId ?? null);
     setPage("terminal");
   };
 
   return (
-    <div className="flex h-full">
-      <Sidebar page={page} onSelect={setPage} />
-      {page === "live" && <LivePage onOpenTerminal={goToTerminal} />}
-      {page === "token" && <TokenPage />}
-      {page === "timeline" && <TimelinePage />}
-      {page === "savings" && <SavingsPage />}
-      {page === "terminal" && <TerminalPage initialSessionId={terminalTarget} />}
-      {page === "provider" && <LivePage onOpenTerminal={goToTerminal} />}
-    </div>
+    <NavProvider value={nav}>
+      <div className="flex h-full">
+        <Sidebar page={page} onSelect={setPage} />
+        {page === "live" && <LivePage onOpenTerminal={goToTerminal} />}
+        {page === "token" && <TokenPage />}
+        {page === "timeline" && <TimelinePage />}
+        {page === "savings" && <SavingsPage />}
+        {page === "terminal" && <TerminalPage initialSessionId={terminalTarget} />}
+        {page === "provider" && <ProviderOverviewPage />}
+      </div>
+    </NavProvider>
   );
 };
 
