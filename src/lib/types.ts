@@ -17,6 +17,17 @@ export interface Activity {
   detail: string | null;
 }
 
+export interface SubAgent {
+  id: string;
+  agentType: string;
+  description: string;
+  model: string | null;
+  tokens: TokenUsage;
+  costUsd: number;
+  priced: boolean;
+  startedMs: number | null;
+}
+
 export interface Session {
   id: string;
   agent: Agent;
@@ -28,6 +39,8 @@ export interface Session {
   status: Status;
   activity: Activity | null;
   tokens: TokenUsage;
+  ownTokens: TokenUsage;
+  subagents: SubAgent[];
   costUsd: number;
   priced: boolean;
   startedAtMs: number | null;

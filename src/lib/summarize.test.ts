@@ -5,6 +5,7 @@ import type { Session } from "@/lib/types";
 const s = (status: Session["status"], out: number, costUsd = 0, priced = true): Session => ({
   id: status + out, agent: "claude", pid: 1, project: "p", cwd: "/p", model: null, branch: null,
   status, activity: null, tokens: { input: 0, output: out, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+  ownTokens: { input: 0, output: out, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, subagents: [],
   costUsd, priced, startedAtMs: null, updatedAtMs: 0,
   quietMs: 0, toolRunningMs: null, health: "ok", healthReason: null,
 });
