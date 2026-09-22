@@ -64,7 +64,7 @@ fn first_line_truncated(s: &str) -> String {
     s.lines().next().unwrap_or("").chars().take(DETAIL_MAX).collect()
 }
 
-fn tool_detail(input: Option<&Value>) -> Option<String> {
+pub(crate) fn tool_detail(input: Option<&Value>) -> Option<String> {
     let input = input?;
     ["command", "file_path", "pattern", "description"]
         .iter()

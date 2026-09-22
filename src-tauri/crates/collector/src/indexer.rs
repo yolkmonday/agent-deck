@@ -1,6 +1,7 @@
 use crate::live::project_name;
 use crate::model::{Agent, TokenUsage};
-use crate::store::{FileProgress, MessageRow, Store};
+use crate::store::{FileProgress, MessageRow, SpanRow, Store};
+use crate::transcript::tool_detail;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -14,6 +15,7 @@ pub struct IndexReport {
     pub files_scanned: usize,
     pub files_skipped: usize,
     pub messages_upserted: usize,
+    pub spans_upserted: usize,
     pub errors: Vec<String>,
 }
 
@@ -150,6 +152,35 @@ fn claude_usage(u: &Value) -> TokenUsage {
     }
 }
 
+fn record_ts(v: &Value, fallback_ms: i64) -> i64 {
+    v.get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(parse_iso_ms)
+        .unwrap_or(fallback_ms)
+}
+
+/// The usage row for an `assistant` record, or `None` when the record carries no
+/// indexable usage (no id/model, or a synthetic model).
+fn claude_message_row(
+    v: &Value,
+    session_id: &str,
+    project: &str,
+    fallback_ms: i64,
+) -> Option<MessageRow> {
+    let msg = v.get("message")?;
+    let mid = msg.get("id").and_then(Value::as_str)?;
+    let model = msg.get("model").and_then(Value::as_str)?;
+    let usage = claude_usage(msg.get("usage")?);
+    claude_row(
+        format!("claude:{mid}"),
+        session_id,
+        project,
+        model,
+        record_ts(v, fallback_ms),
+        usage,
+    )
+}
+
 pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> IndexReport {
     let mut report = IndexReport::default();
     if !projects_dir.exists() {
@@ -200,42 +231,107 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
             }
         }
         let mut cwd = String::new();
-        let rows: Vec<MessageRow> = lines
-            .iter()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .filter(|v| v.get("type").and_then(Value::as_str) == Some("assistant"))
-            .filter_map(|v| {
-                if let Some(c) = v.get("cwd").and_then(Value::as_str) {
-                    cwd = c.to_string();
+        let mut rows: Vec<MessageRow> = Vec::new();
+        let mut spans: Vec<SpanRow> = Vec::new();
+        // tool_use id -> (index into `spans`, span) so a later tool_result in the
+        // same pass can close it without a second lookup.
+        let mut open: std::collections::HashMap<String, usize> = Default::default();
+        for v in lines.iter().filter_map(|line| serde_json::from_str::<Value>(line).ok()) {
+            if let Some(c) = v.get("cwd").and_then(Value::as_str) {
+                cwd = c.to_string();
+            }
+            let project = if cwd.is_empty() {
+                "unknown".to_string()
+            } else {
+                project_name(&cwd, home)
+            };
+            match v.get("type").and_then(Value::as_str) {
+                Some("assistant") => {
+                    if let Some(r) = claude_message_row(&v, &session_id, &project, mtime_ms) {
+                        rows.push(r);
+                    }
+                    let Some(msg) = v.get("message") else { continue };
+                    let Some(items) = msg.get("content").and_then(Value::as_array) else { continue };
+                    let tokens = msg.get("usage").map(claude_usage);
+                    for item in items
+                        .iter()
+                        .filter(|i| i.get("type").and_then(Value::as_str) == Some("tool_use"))
+                    {
+                        let (Some(id), Some(name)) = (
+                            item.get("id").and_then(Value::as_str),
+                            item.get("name").and_then(Value::as_str),
+                        ) else {
+                            continue;
+                        };
+                        let ts = record_ts(&v, mtime_ms);
+                        open.insert(id.to_string(), spans.len());
+                        spans.push(SpanRow {
+                            id: format!("claude:{id}"),
+                            agent: Agent::Claude,
+                            session_id: session_id.clone(),
+                            project: project.clone(),
+                            model: msg
+                                .get("model")
+                                .and_then(Value::as_str)
+                                .filter(|m| !m.is_empty() && *m != "<synthetic>")
+                                .map(str::to_string),
+                            tool: name.to_string(),
+                            detail: tool_detail(item.get("input")),
+                            start_ms: ts,
+                            end_ms: None,
+                            status: "running".into(),
+                            tokens: tokens.clone(),
+                        });
+                    }
                 }
-                let msg = v.get("message")?;
-                let mid = msg.get("id").and_then(Value::as_str)?;
-                let model = msg.get("model").and_then(Value::as_str)?;
-                let usage = claude_usage(msg.get("usage")?);
-                let ts = v
-                    .get("timestamp")
-                    .and_then(Value::as_str)
-                    .and_then(parse_iso_ms)
-                    .unwrap_or(mtime_ms);
-                let project = if cwd.is_empty() {
-                    "unknown".to_string()
-                } else {
-                    project_name(&cwd, home)
-                };
-                claude_row(
-                    format!("claude:{mid}"),
-                    &session_id,
-                    &project,
-                    model,
-                    ts,
-                    usage,
-                )
-            })
-            .collect();
+                Some("user") => {
+                    let Some(items) = v
+                        .get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(Value::as_array)
+                    else {
+                        continue;
+                    };
+                    let ts = record_ts(&v, mtime_ms);
+                    for item in items
+                        .iter()
+                        .filter(|i| i.get("type").and_then(Value::as_str) == Some("tool_result"))
+                    {
+                        let Some(id) = item.get("tool_use_id").and_then(Value::as_str) else {
+                            continue;
+                        };
+                        let end_ms = Some(ts);
+                        let status = if item.get("is_error").and_then(Value::as_bool) == Some(true) {
+                            "error"
+                        } else {
+                            "ok"
+                        };
+                        if let Some(i) = open.remove(id) {
+                            spans[i].end_ms = end_ms;
+                            spans[i].status = status.to_string();
+                            continue;
+                        }
+                        // The tool_use was seen in an earlier pass: merge into the
+                        // stored row. An orphan result (no opening row) is ignored.
+                        let key = format!("claude:{id}");
+                        if let Ok(Some(mut existing)) = store.span_by_id(&key) {
+                            existing.end_ms = end_ms;
+                            existing.status = status.to_string();
+                            spans.push(existing);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
 
         match store.upsert_messages(&rows) {
             Ok(n) => report.messages_upserted += n,
             Err(e) => report.errors.push(format!("upsert failed: {e}")),
+        }
+        match store.upsert_spans(&spans) {
+            Ok(n) => report.spans_upserted += n,
+            Err(e) => report.errors.push(format!("span upsert failed: {e}")),
         }
         if let Err(e) = store.set_file_progress(&FileProgress {
             path: key,
@@ -500,6 +596,19 @@ mod tests {
         )
     }
 
+    fn claude_tool_use(mid: &str, tool_id: &str, name: &str, input: &str) -> String {
+        let input = serde_json::to_string(input).unwrap();
+        format!(
+            r#"{{"type":"assistant","cwd":"/Users/yolk/Dev/kirimi","timestamp":"2026-09-21T09:42:37.055Z","message":{{"id":"{mid}","model":"claude-sonnet-5","usage":{{"input_tokens":10,"output_tokens":50,"cache_read_input_tokens":100,"cache_creation_input_tokens":1000}},"content":[{{"type":"tool_use","id":"{tool_id}","name":"{name}","input":{{"command":{input}}}}}]}}}}"#
+        )
+    }
+
+    fn claude_tool_result(tool_id: &str, is_error: bool) -> String {
+        format!(
+            r#"{{"type":"user","timestamp":"2026-09-21T09:42:37.055Z","message":{{"content":[{{"type":"tool_result","tool_use_id":"{tool_id}","is_error":{is_error}}}]}}}}"#
+        )
+    }
+
     fn store_at(dir: &Path) -> Store {
         Store::open(&dir.join("agent-deck.db")).unwrap()
     }
@@ -665,6 +774,120 @@ mod tests {
         assert_eq!(r.messages_upserted, 1);
         assert_eq!(s.counts().unwrap().1, 1);
         assert_eq!(s.totals(0).unwrap().tokens.output, 4);
+    }
+
+    #[test]
+    fn claude_span_opens_and_closes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("s1.jsonl"),
+            format!("{}\n{}\n", claude_tool_use("m1", "t1", "Bash", "bun test"), claude_tool_result("t1", false)),
+        )
+        .unwrap();
+
+        let mut s = store_at(tmp.path());
+        let r = index_claude(&mut s, &projects, home());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(r.spans_upserted, 1);
+
+        let spans = s.spans(0, i64::MAX).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].id, "claude:t1");
+        assert_eq!(spans[0].tool, "Bash");
+        assert_eq!(spans[0].status, "ok");
+        assert_eq!(spans[0].start_ms, 1789983757055);
+        assert_eq!(spans[0].end_ms, Some(1789983757055));
+    }
+
+    #[test]
+    fn claude_span_error_flag_sets_error_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("s1.jsonl"),
+            format!("{}\n{}\n", claude_tool_use("m1", "t1", "Bash", "false"), claude_tool_result("t1", true)),
+        )
+        .unwrap();
+
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        let spans = s.spans(0, i64::MAX).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].status, "error");
+        assert!(spans[0].end_ms.is_some());
+    }
+
+    #[test]
+    fn claude_unclosed_span_stays_running() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("s1.jsonl"),
+            format!("{}\n", claude_tool_use("m1", "t1", "Read", "/Users/yolk/Dev/kirimi/src/a.ts")),
+        )
+        .unwrap();
+
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        let spans = s.spans(0, i64::MAX).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].end_ms, None);
+        assert_eq!(spans[0].status, "running");
+    }
+
+    #[test]
+    fn claude_span_closed_in_a_later_pass() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("s1.jsonl");
+        std::fs::write(&file, format!("{}\n", claude_tool_use("m1", "t1", "Bash", "bun test"))).unwrap();
+
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        assert_eq!(s.spans(0, i64::MAX).unwrap()[0].status, "running");
+
+        append(&file, &format!("{}\n", claude_tool_result("t1", false)));
+        index_claude(&mut s, &projects, home());
+
+        let spans = s.spans(0, i64::MAX).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].status, "ok");
+        assert!(spans[0].end_ms.is_some());
+    }
+
+    #[test]
+    fn claude_span_carries_detail_and_tokens() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let long = "bun test --filter fare ".repeat(10);
+        std::fs::write(
+            dir.join("s1.jsonl"),
+            format!("{}\n", claude_tool_use("m1", "t1", "Bash", &long)),
+        )
+        .unwrap();
+
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        let spans = s.spans(0, i64::MAX).unwrap();
+        assert_eq!(spans.len(), 1);
+        let detail = spans[0].detail.as_ref().unwrap();
+        assert_eq!(detail.chars().count(), 80);
+        assert_eq!(detail, &long[..80]);
+        let tokens = spans[0].tokens.clone().expect("span should carry the opener's usage");
+        assert_eq!(tokens.output, 50);
+        assert_eq!(tokens.cache_read, 100);
+        assert!(tokens.total() > 0);
     }
 
     #[test]
