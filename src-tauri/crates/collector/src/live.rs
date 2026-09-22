@@ -1,5 +1,5 @@
 use crate::claude::{read_claude_sessions, ClaudeLive};
-use crate::health::{self, Health, Thresholds};
+use crate::health::{self, Thresholds};
 use crate::model::{Activity, ActivityKind, Agent, LiveSnapshot, Orphan, Session, Status};
 use crate::opencode::{read_active, running_dirs, OpencodeLive};
 use crate::process::ProcessTable;
@@ -223,7 +223,7 @@ impl LiveCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::health::Thresholds;
+    use crate::health::{Health, Thresholds};
     use crate::model::{ActivityKind, Agent};
     use crate::process::{FakeProcessTable, ProcInfo};
     use std::fs;
