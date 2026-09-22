@@ -66,8 +66,11 @@ export const ProjectPage = () => {
   const busy = create.isPending || update.isPending || remove.isPending;
   const nextSortOrder = list.reduce((max, p) => Math.max(max, p.sortOrder), 0) + 1;
 
+  // A prefilled suggestion has an empty id: it is a draft, not an existing row.
+  const isEdit = editing !== null && editing.id !== "";
+
   const submit = (input: ProjectInput) => {
-    if (editing === null) create.mutate(input);
+    if (!isEdit) create.mutate(input);
     else update.mutate({ id: editing.id, input });
   };
 

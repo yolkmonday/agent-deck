@@ -101,7 +101,9 @@ export const ProjectForm = ({
   return (
     <section className="flex w-90 shrink-0 flex-col gap-4">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold">{editing === null ? "Project baru" : "Ubah project"}</span>
+        <span className="text-sm font-semibold">
+          {editing === null || editing.id === "" ? "Project baru" : "Ubah project"}
+        </span>
         {editing !== null && (
           <button
             type="button"
