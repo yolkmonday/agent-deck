@@ -1,5 +1,6 @@
 mod config;
 mod probe;
+mod projects;
 mod providers;
 mod secrets;
 mod terminal;
