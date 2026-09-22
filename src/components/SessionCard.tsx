@@ -4,8 +4,12 @@ import { AgentIcon } from "@/components/BrandIcon";
 import { ClaudeThinking } from "@/components/brainless/claude/claude-thinking";
 import { formatUsd } from "@/lib/cost";
 import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
-import type { Session } from "@/lib/types";
+import type { Session, SubAgent } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
+
+// One busy session must not stretch its row past its neighbours, so only the
+// first few running subagents get a line of their own.
+const SUBAGENT_ROWS = 4;
 
 const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 const agentName = { claude: "Claude", opencode: "opencode", codex: "Codex" } as const;
@@ -36,6 +40,28 @@ const activityText = (s: Session): { label: string; detail: string | null } => {
   if (a.kind === "done") return { label: "Selesai", detail: null };
   return { label: a.label, detail: a.detail };
 };
+
+const SubAgentRow = ({ sub }: { sub: SubAgent }) => (
+  <div className="flex min-w-0 items-center gap-2 pt-1.5">
+    <Icon icon="lucide:git-branch" width={12} height={12} className="shrink-0 text-fg-3" />
+    <span className="shrink-0 text-[11.5px] font-semibold text-fg-2">{sub.agentType}</span>
+    <span className="min-w-0 flex-1 truncate text-[11.5px] text-fg-3" title={sub.description}>
+      {sub.description}
+    </span>
+    <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">
+      {formatTokens(totalTokens(sub.tokens))}
+    </span>
+    {sub.priced ? (
+      <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">
+        {formatUsd(sub.costUsd)}
+      </span>
+    ) : (
+      <span className="shrink-0 font-mono text-[11.5px] text-fg-3" title="Model ini belum ada di tabel harga.">
+        -
+      </span>
+    )}
+  </div>
+);
 
 export const SessionCard = ({
   session: s,
@@ -157,6 +183,19 @@ export const SessionCard = ({
           </span>
         )}
       </div>
+      {s.subagents.length > 0 && (
+        <div className="flex min-w-0 flex-col divide-y divide-border border-t border-border pt-1">
+          <span className="text-[11.5px] text-fg-3">Subagent ({s.subagents.length})</span>
+          {s.subagents.slice(0, SUBAGENT_ROWS).map((sub) => (
+            <SubAgentRow key={sub.id} sub={sub} />
+          ))}
+          {s.subagents.length > SUBAGENT_ROWS && (
+            <span className="pt-1.5 text-[11.5px] text-fg-3">
+              +{s.subagents.length - SUBAGENT_ROWS} lagi
+            </span>
+          )}
+        </div>
+      )}
       <div className="mt-auto flex flex-col gap-2">
         <div className="flex items-center gap-3 font-mono text-[11.5px] whitespace-nowrap">
           <span className="text-fg-2">{formatTokens(totalTokens(s.tokens))}</span>

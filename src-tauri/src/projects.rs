@@ -385,6 +385,8 @@ mod tests {
                     status: collector::model::Status::Idle,
                     activity: None,
                     tokens: Default::default(),
+                    own_tokens: Default::default(),
+                    subagents: Vec::new(),
                     cost_usd: 0.0,
                     priced: false,
                     started_at_ms: None,

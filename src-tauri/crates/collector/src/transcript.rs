@@ -1,7 +1,7 @@
 use crate::model::TokenUsage;
 use anyhow::Result;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,12 @@ pub struct TranscriptState {
     /// Timestamp of the record that opened the still-pending tool. Cleared when
     /// the tool closes, so it is only ever a duration while a tool is open.
     pub tool_started_ms: Option<i64>,
+    /// Agent ids whose result has landed in this transcript. A subagent listed
+    /// here has finished; anything else in `subagents/` may still be running.
+    pub agents_done: HashSet<String>,
+    /// Timestamp of the very first record this tailer ever parsed, so a
+    /// subagent can be ordered by when it was spawned.
+    pub started_ms: Option<i64>,
 }
 
 pub fn encode_cwd(cwd: &str) -> String {
@@ -125,6 +131,9 @@ impl TranscriptState {
             other => other.as_i64(),
         }) {
             self.last_record_ms = Some(ts);
+            if self.started_ms.is_none() {
+                self.started_ms = Some(ts);
+            }
         }
         match v.get("type").and_then(Value::as_str) {
             Some("assistant") => self.apply_assistant(v),
@@ -176,6 +185,14 @@ impl TranscriptState {
 
     fn apply_user(&mut self, v: &Value) {
         self.turn_ended = false;
+        if let Some(id) = v
+            .get("toolUseResult")
+            .and_then(|r| r.get("agentId"))
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        {
+            self.agents_done.insert(id.to_string());
+        }
         let Some(items) = v
             .get("message")
             .and_then(|m| m.get("content"))
@@ -309,6 +326,51 @@ mod tests {
         st.advance(&p).unwrap();
         assert_eq!(st.tokens.output, 1);
         assert!(st.pending_tool_id.is_none());
+    }
+
+    #[test]
+    fn agents_done_collects_agent_ids_from_tool_use_result() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("s.jsonl");
+        append(
+            &p,
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\"}]},\"toolUseResult\":{\"agentId\":\"a1\",\"status\":\"completed\"}}\n",
+        );
+        let mut st = TranscriptState::default();
+        st.advance(&p).unwrap();
+        assert!(st.agents_done.contains("a1"));
+    }
+
+    #[test]
+    fn agents_done_ignores_a_tool_result_without_an_agent_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("s.jsonl");
+        append(
+            &p,
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\"}]},\"toolUseResult\":{\"stdout\":\"hello\"}}\n",
+        );
+        let mut st = TranscriptState::default();
+        st.advance(&p).unwrap();
+        assert!(st.agents_done.is_empty());
+    }
+
+    #[test]
+    fn agents_done_survives_incremental_reads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("s.jsonl");
+        append(
+            &p,
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\"}]},\"toolUseResult\":{\"agentId\":\"a1\"}}\n",
+        );
+        let mut st = TranscriptState::default();
+        st.advance(&p).unwrap();
+        append(
+            &p,
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t2\"}]},\"toolUseResult\":{\"agentId\":\"a2\"}}\n",
+        );
+        st.advance(&p).unwrap();
+        assert!(st.agents_done.contains("a1"));
+        assert!(st.agents_done.contains("a2"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::health::Health;
+use crate::subagent::SubAgent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -80,7 +81,12 @@ pub struct Session {
     pub branch: Option<String>,
     pub status: Status,
     pub activity: Option<Activity>,
+    /// The parent's own usage plus every running subagent's. A subagent record
+    /// never lands in the parent transcript, so the two are disjoint.
     pub tokens: TokenUsage,
+    /// The parent transcript's own usage, without the subagents folded in.
+    pub own_tokens: TokenUsage,
+    pub subagents: Vec<SubAgent>,
     pub cost_usd: f64,
     pub priced: bool,
     pub started_at_ms: Option<i64>,
@@ -149,7 +155,8 @@ mod tests {
         let s = Session {
             id: "s1".into(), agent: Agent::Claude, pid: Some(1), project: "p".into(), cwd: "/p".into(),
             model: None, branch: None, status: Status::Waiting, activity: None,
-            tokens: TokenUsage::default(), cost_usd: 0.0, priced: false,
+            tokens: TokenUsage::default(), own_tokens: TokenUsage::default(), subagents: vec![],
+            cost_usd: 0.0, priced: false,
             started_at_ms: None, updated_at_ms: 5,
             quiet_ms: 0, tool_running_ms: None, health: Health::Ok, health_reason: None,
         };
@@ -158,6 +165,8 @@ mod tests {
         assert_eq!(v["status"], "waiting");
         assert_eq!(v["updatedAtMs"], 5);
         assert_eq!(v["tokens"]["cacheRead"], 0);
+        assert_eq!(v["ownTokens"]["cacheRead"], 0);
+        assert_eq!(v["subagents"], serde_json::json!([]));
         assert_eq!(v["costUsd"], 0.0);
         assert_eq!(v["priced"], false);
         assert_eq!(v["quietMs"], 0);
