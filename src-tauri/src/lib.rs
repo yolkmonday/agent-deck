@@ -18,6 +18,8 @@ use collector::pricing::{PriceEntry, PriceTable};
 use collector::process::SystemProcessTable;
 use collector::savings::{read_lean_ctx, read_rtk};
 use collector::store::{AccountAgg, ModelAgg, ProjectAgg, SpanRow, Store, TotalsAgg};
+use collector::tail::{read_tail, TailEntry};
+use collector::transcript;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1391,6 +1393,59 @@ fn project_suggestions(
     Ok(projects::suggestions(&live, &known, &saved_paths, &home))
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TranscriptTail {
+    entries: Vec<TailEntry>,
+    file_size: u64,
+    found: bool,
+}
+
+const TAIL_ENTRIES: usize = 60;
+
+fn tail_path(projects: &std::path::Path, session_id: &str, cwd: &str, agent_id: Option<&str>) -> Option<PathBuf> {
+    let parent = transcript::find_transcript(projects, cwd, session_id)?;
+    match agent_id.filter(|id| !id.is_empty()) {
+        Some(id) => Some(
+            parent
+                .with_extension("")
+                .join("subagents")
+                .join(format!("agent-{id}.jsonl")),
+        ),
+        None => Some(parent),
+    }
+}
+
+/// The last records of a session transcript, for the live viewer. Conversation
+/// text travels from disk to the caller and is never stored or logged: the index
+/// keeps tool names and usage only.
+#[tauri::command]
+fn session_tail(
+    session_id: String,
+    cwd: String,
+    agent_id: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<TranscriptTail, String> {
+    let _ = &state;
+    let projects = Paths::for_home(&home_dir()).claude_projects;
+    let path = tail_path(&projects, &session_id, &cwd, agent_id.as_deref());
+    let missing = || TranscriptTail {
+        entries: Vec::new(),
+        file_size: 0,
+        found: false,
+    };
+    // A session with no transcript yet is an empty viewer, not a failure.
+    let Some(path) = path.filter(|p| p.exists()) else {
+        return Ok(missing());
+    };
+    let (entries, file_size) = read_tail(&path, TAIL_ENTRIES).map_err(|e| e.to_string())?;
+    Ok(TranscriptTail {
+        entries,
+        file_size,
+        found: true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1804,6 +1859,66 @@ mod tests {
         a.started_on = None;
         assert_eq!(validate_account(&a), Ok(()));
     }
+
+    #[test]
+    fn transcript_tail_wire_shape_matches_the_frontend_contract() {
+        let tail = TranscriptTail {
+            entries: vec![
+                TailEntry::Assistant {
+                    ms: 1758526717824,
+                    text: "halo".into(),
+                    model: Some("claude-sonnet-5".into()),
+                },
+                TailEntry::Tool {
+                    ms: 1758526718000,
+                    name: "Bash".into(),
+                    input: "{\"command\":\"bun test\"}".into(),
+                    status: collector::tail::ToolStatus::Ok,
+                },
+                TailEntry::Result {
+                    ms: 1758526719000,
+                    tool_name: "Bash".into(),
+                    preview: "3 pass".into(),
+                    is_error: false,
+                },
+            ],
+            file_size: 4096,
+            found: true,
+        };
+        let v = serde_json::to_value(&tail).unwrap();
+        assert_eq!(v["fileSize"], 4096);
+        assert_eq!(v["found"], true);
+        assert_eq!(v["entries"][0]["kind"], "assistant");
+        assert_eq!(v["entries"][0]["ms"], 1758526717824i64);
+        assert_eq!(v["entries"][0]["model"], "claude-sonnet-5");
+        assert_eq!(v["entries"][1]["kind"], "tool");
+        assert_eq!(v["entries"][1]["status"], "ok");
+        assert_eq!(v["entries"][2]["kind"], "result");
+        assert_eq!(v["entries"][2]["toolName"], "Bash");
+        assert_eq!(v["entries"][2]["isError"], false);
+    }
+
+    #[test]
+    fn tail_path_selects_the_subagent_transcript() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path();
+        let dir = projects.join("-Users-yolk-Dev-kirimi");
+        std::fs::create_dir_all(dir.join("s1/subagents")).unwrap();
+        std::fs::write(dir.join("s1.jsonl"), "").unwrap();
+        std::fs::write(dir.join("s1/subagents/agent-a1.jsonl"), "").unwrap();
+
+        let cwd = "/Users/yolk/Dev/kirimi";
+        assert_eq!(
+            tail_path(projects, "s1", cwd, None),
+            Some(dir.join("s1.jsonl"))
+        );
+        assert_eq!(
+            tail_path(projects, "s1", cwd, Some("a1")),
+            Some(dir.join("s1/subagents/agent-a1.jsonl"))
+        );
+        assert_eq!(tail_path(projects, "s1", cwd, Some("nope")), Some(dir.join("s1/subagents/agent-nope.jsonl")));
+        assert_eq!(tail_path(projects, "missing", cwd, None), None);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1912,6 +2027,7 @@ pub fn run() {
             project_suggestions,
             settings_get,
             settings_set,
+            session_tail,
             window_focused
         ])
         .build(tauri::generate_context!())

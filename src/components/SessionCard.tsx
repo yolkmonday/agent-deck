@@ -3,6 +3,7 @@ import { Icon } from "@iconify/react";
 import { AgentIcon } from "@/components/BrandIcon";
 import { ClaudeThinking } from "@/components/brainless/claude/claude-thinking";
 import { RecoverMenu } from "@/components/RecoverMenu";
+import { TranscriptModal } from "@/components/TranscriptModal";
 import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
 import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session, SubAgent } from "@/lib/types";
@@ -91,7 +92,9 @@ export const SessionCard = ({
   const [busy, setBusy] = useState(false);
   const [subagentsOpen, setSubagentsOpen] = useState(false);
   const [confirmStart, setConfirmStart] = useState(false);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const transcriptRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!highlighted) return;
@@ -166,7 +169,12 @@ export const SessionCard = ({
           </span>
         )}
       </div>
-      <div className="flex min-w-0 flex-col gap-0.75">
+      <button
+        type="button"
+        ref={transcriptRef}
+        onClick={() => setTranscriptOpen(true)}
+        className="flex min-w-0 cursor-pointer flex-col gap-0.75 text-left"
+      >
         <span className="truncate text-base font-semibold" title={s.project}>
           {s.project}
         </span>
@@ -187,7 +195,7 @@ export const SessionCard = ({
             </span>
           )}
         </span>
-      </div>
+      </button>
       <div className={`flex min-w-0 flex-col gap-1 rounded-md px-3 py-2.5 ${waiting ? "bg-waiting/10" : "bg-bg"}`}>
         {thinking ? (
           // Single verb, no token estimate, no interrupt hint: see the P14 plan for why.
@@ -305,6 +313,17 @@ export const SessionCard = ({
             </button>
           )}
         </span>
+      )}
+      {transcriptOpen && (
+        <TranscriptModal
+          session={s}
+          onClose={() => {
+            setTranscriptOpen(false);
+            // WKWebView does not focus a button on click, so the card hands
+            // focus back to itself rather than relying on the modal's memory.
+            transcriptRef.current?.focus();
+          }}
+        />
       )}
     </div>
   );
