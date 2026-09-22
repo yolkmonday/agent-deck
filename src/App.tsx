@@ -17,6 +17,10 @@ import { TokenPage } from "@/pages/TokenPage";
 import { useLive, startLive } from "@/store/live";
 import { focusTerminal, startTerminalEvents, useTerminal } from "@/store/terminal";
 
+// Stable reference: a fresh [] in the selector makes zustand see a new snapshot
+// on every render and loop forever while the first live snapshot is still null.
+const NO_SESSIONS: Session[] = [];
+
 const App = () => {
   const [page, setPage] = useState<PageKey>("live");
   const [terminalTarget, setTerminalTarget] = useState<string | null>(null);
@@ -70,7 +74,7 @@ const App = () => {
     setPage("terminal");
   };
 
-  const sessions = useLive((s) => s.snapshot?.sessions ?? []);
+  const sessions = useLive((s) => s.snapshot?.sessions ?? NO_SESSIONS);
   const terms = useTerminal((s) => s.sessions);
   const termsRef = useRef(terms);
   termsRef.current = terms;
