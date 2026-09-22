@@ -15,6 +15,12 @@ const statusPill = {
 } as const;
 const dot = { busy: "bg-busy", waiting: "bg-waiting", idle: "bg-idle" } as const;
 
+// A stalled session borrows the error colours and a slow one the waiting colours,
+// so the board never shows three different greens for three very different states.
+const healthPill = { stalled: "bg-err/15 text-err", slow: "bg-waiting/15 text-waiting" } as const;
+const healthDot = { stalled: "bg-err", slow: "bg-waiting" } as const;
+const healthText = { stalled: "Macet", slow: "Lambat" } as const;
+
 const activityText = (s: Session): { label: string; detail: string | null } => {
   const a = s.activity;
   if (!a) return { label: "Diam", detail: null };
@@ -38,6 +44,8 @@ export const SessionCard = ({
   onHighlightDone?: () => void;
 }) => {
   const waiting = s.status === "waiting";
+  const stalled = s.health === "stalled";
+  const slow = s.health === "slow";
   const act = activityText(s);
   const since = s.startedAtMs ? formatDuration(nowMs - s.startedAtMs) : "-";
   const terminalSessions = useTerminal((st) => st.sessions);
@@ -78,7 +86,11 @@ export const SessionCard = ({
     <div
       ref={rootRef}
       className={`flex h-full min-w-0 flex-col gap-3 rounded-[10px] border p-4 ${
-        waiting ? "border-waiting/40 bg-waiting/6" : "border-border bg-surface"
+        stalled
+          ? "border-err/40 bg-err/6"
+          : waiting || slow
+            ? "border-waiting/40 bg-waiting/6"
+            : "border-border bg-surface"
       } ${highlighted ? "ring-2 ring-waiting/70" : ""}`}
     >
       <div className="flex items-center justify-between">
@@ -86,10 +98,17 @@ export const SessionCard = ({
           <AgentIcon agent={s.agent} size={14} className={agentText[s.agent]} />
           {agentName[s.agent]}
         </span>
-        <span className={`flex items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${statusPill[s.status]}`}>
-          <span className={`size-1.5 rounded-full ${dot[s.status]}`} />
-          {statusLabel[s.status]}
-        </span>
+        {s.health === "ok" ? (
+          <span className={`flex items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${statusPill[s.status]}`}>
+            <span className={`size-1.5 rounded-full ${dot[s.status]}`} />
+            {statusLabel[s.status]}
+          </span>
+        ) : (
+          <span className={`flex items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${healthPill[s.health]}`}>
+            <span className={`size-1.5 rounded-full ${healthDot[s.health]}`} />
+            {healthText[s.health]}
+          </span>
+        )}
       </div>
       <div className="flex min-w-0 flex-col gap-0.75">
         <span className="truncate text-base font-semibold" title={s.project}>
@@ -109,6 +128,11 @@ export const SessionCard = ({
         {act.detail && (
           <span className="line-clamp-2 break-all font-mono text-xs leading-[1.4]" title={act.detail}>
             {act.detail}
+          </span>
+        )}
+        {s.health !== "ok" && s.healthReason && (
+          <span className={`truncate text-[11.5px] ${stalled ? "text-err" : "text-waiting"}`} title={s.healthReason}>
+            {s.healthReason}
           </span>
         )}
       </div>

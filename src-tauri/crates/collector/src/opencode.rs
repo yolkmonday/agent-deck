@@ -18,6 +18,7 @@ pub struct OpencodeLive {
     pub tokens: TokenUsage,
     pub status: Status,
     pub running_tool: Option<String>,
+    pub tool_started_ms: Option<i64>,
     pub pid: u32,
     pub updated_at_ms: i64,
 }
@@ -61,6 +62,22 @@ fn running_tool(conn: &Connection, session_id: &str) -> Option<String> {
          ORDER BY time_created DESC LIMIT 1",
         [session_id],
         |r| r.get::<_, Option<String>>(0),
+    )
+    .ok()
+    .flatten()
+}
+
+/// The running tool's own start time when opencode recorded one, falling back to
+/// when the part row was created. Unlike Claude's transcript there is no
+/// timestamp on the enclosing record, so `time_created` is the best available.
+fn running_tool_start(conn: &Connection, session_id: &str) -> Option<i64> {
+    conn.query_row(
+        "SELECT COALESCE(json_extract(data,'$.state.time.start'), time_created) FROM part \
+         WHERE session_id = ?1 AND json_extract(data,'$.type') = 'tool' \
+         AND json_extract(data,'$.state.status') = 'running' \
+         ORDER BY time_created DESC LIMIT 1",
+        [session_id],
+        |r| r.get::<_, Option<i64>>(0),
     )
     .ok()
     .flatten()
@@ -112,6 +129,7 @@ pub fn read_active(db: &Path, procs: &dyn ProcessTable, now_ms: i64) -> Result<V
         } else {
             Status::Idle
         };
+        let tool_started_ms = tool.as_ref().and_then(|_| running_tool_start(&conn, &id));
         out.push(OpencodeLive {
             id,
             directory,
@@ -120,6 +138,7 @@ pub fn read_active(db: &Path, procs: &dyn ProcessTable, now_ms: i64) -> Result<V
             tokens,
             status,
             running_tool: tool,
+            tool_started_ms,
             pid,
             updated_at_ms: updated,
         });

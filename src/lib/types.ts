@@ -1,6 +1,7 @@
 export type Agent = "claude" | "opencode" | "codex";
 export type Status = "busy" | "waiting" | "idle";
 export type ActivityKind = "tool" | "waiting" | "thinking" | "done";
+export type Health = "ok" | "slow" | "stalled";
 
 export interface TokenUsage {
   input: number;
@@ -31,6 +32,17 @@ export interface Session {
   priced: boolean;
   startedAtMs: number | null;
   updatedAtMs: number;
+  quietMs: number;
+  toolRunningMs: number | null;
+  health: Health;
+  healthReason: string | null;
+}
+
+export interface Orphan {
+  agent: Agent;
+  pid: number;
+  cwd: string;
+  ageMs: number;
 }
 
 export interface LiveSnapshot {
@@ -39,6 +51,7 @@ export interface LiveSnapshot {
   generatedAtMs: number;
   costUsd: number;
   unpriced: number;
+  orphans: Orphan[];
 }
 
 export interface FeedEvent {

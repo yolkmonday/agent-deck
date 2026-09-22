@@ -204,20 +204,32 @@ export interface ProjectSuggestion {
 
 export type AttentionMode = "off" | "notify" | "auto";
 
-export const DEFAULT_SETTINGS: Settings = { attentionMode: "notify", notifySound: false };
+export const DEFAULT_SETTINGS: Settings = {
+  attentionMode: "notify",
+  notifySound: false,
+  stallMinutes: 5,
+  slowToolMinutes: 10,
+};
 
 export interface Settings {
   attentionMode: AttentionMode;
   notifySound: boolean;
+  stallMinutes: number;
+  slowToolMinutes: number;
 }
 
 const modes: AttentionMode[] = ["off", "notify", "auto"];
+
+const minutes = (value: unknown, fallback: number): number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback;
 
 export const normalizeSettings = (s: Partial<Settings> | null | undefined): Settings => ({
   attentionMode: modes.includes(s?.attentionMode as AttentionMode)
     ? (s?.attentionMode as AttentionMode)
     : DEFAULT_SETTINGS.attentionMode,
   notifySound: typeof s?.notifySound === "boolean" ? s.notifySound : DEFAULT_SETTINGS.notifySound,
+  stallMinutes: minutes(s?.stallMinutes, DEFAULT_SETTINGS.stallMinutes),
+  slowToolMinutes: minutes(s?.slowToolMinutes, DEFAULT_SETTINGS.slowToolMinutes),
 });
 
 export const settingsGet = () => invoke<Settings>("settings_get").then(normalizeSettings);

@@ -6,6 +6,7 @@ mod secrets;
 mod terminal;
 
 use collector::indexer::{index_claude, index_codex, index_opencode, IndexReport};
+use collector::health::Thresholds;
 use collector::live::{LiveCollector, Paths};
 use collector::model::{Agent, LiveSnapshot, TokenUsage};
 use collector::pricing::{PriceEntry, PriceTable};
@@ -364,7 +365,8 @@ fn status(state: &AppState) -> Result<IndexStatus, String> {
 #[tauri::command]
 fn live_snapshot(state: State<'_, Arc<AppState>>) -> LiveSnapshot {
     let prices = state.pricing.lock().unwrap().clone();
-    state.collector.lock().unwrap().snapshot(now_ms(), &prices)
+    let thresholds = thresholds(&state);
+    state.collector.lock().unwrap().snapshot(now_ms(), &prices, &thresholds)
 }
 
 #[tauri::command]
@@ -783,13 +785,21 @@ fn config_restore(path: String, state: State<'_, Arc<AppState>>) -> Result<(), S
 pub const ATTENTION_MODES: [&str; 3] = ["off", "notify", "auto"];
 pub const ATTENTION_MODE_KEY: &str = "attention_mode";
 pub const NOTIFY_SOUND_KEY: &str = "notify_sound";
+pub const STALL_MINUTES_KEY: &str = "stall_minutes";
+pub const SLOW_TOOL_MINUTES_KEY: &str = "slow_tool_minutes";
 const SETTING_TRUE: &str = "1";
+
+pub const DEFAULT_STALL_MINUTES: i64 = 5;
+pub const DEFAULT_SLOW_TOOL_MINUTES: i64 = 10;
+const MINUTES_ERROR: &str = "menit harus minimal 1";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
     attention_mode: String,
     notify_sound: bool,
+    stall_minutes: i64,
+    slow_tool_minutes: i64,
 }
 
 impl Default for Settings {
@@ -797,12 +807,15 @@ impl Default for Settings {
         Settings {
             attention_mode: "notify".into(),
             notify_sound: false,
+            stall_minutes: DEFAULT_STALL_MINUTES,
+            slow_tool_minutes: DEFAULT_SLOW_TOOL_MINUTES,
         }
     }
 }
 
 /// An unknown value already in the table is a downgrade, not an error: the user
 /// gets the conservative default instead of a dashboard that refuses to start.
+/// The same goes for a stored minute count that is not a usable positive number.
 fn settings_read(store: &Store) -> Result<Settings, String> {
     let mode = match store
         .setting(ATTENTION_MODE_KEY)
@@ -817,15 +830,28 @@ fn settings_read(store: &Store) -> Result<Settings, String> {
         .map_err(|e| e.to_string())?
         .map(|v| v == SETTING_TRUE)
         .unwrap_or(false);
+    let minutes = |key: &str, fallback: i64| -> Result<i64, String> {
+        Ok(store
+            .setting(key)
+            .map_err(|e| e.to_string())?
+            .and_then(|v| v.parse::<i64>().ok())
+            .filter(|v| *v >= 1)
+            .unwrap_or(fallback))
+    };
     Ok(Settings {
         attention_mode: mode,
         notify_sound,
+        stall_minutes: minutes(STALL_MINUTES_KEY, DEFAULT_STALL_MINUTES)?,
+        slow_tool_minutes: minutes(SLOW_TOOL_MINUTES_KEY, DEFAULT_SLOW_TOOL_MINUTES)?,
     })
 }
 
 fn settings_write(store: &mut Store, settings: &Settings) -> Result<Settings, String> {
     if !ATTENTION_MODES.contains(&settings.attention_mode.as_str()) {
         return Err("mode tidak dikenal".into());
+    }
+    if settings.stall_minutes < 1 || settings.slow_tool_minutes < 1 {
+        return Err(MINUTES_ERROR.into());
     }
     store
         .set_setting(ATTENTION_MODE_KEY, &settings.attention_mode)
@@ -836,7 +862,23 @@ fn settings_write(store: &mut Store, settings: &Settings) -> Result<Settings, St
             if settings.notify_sound { SETTING_TRUE } else { "0" },
         )
         .map_err(|e| e.to_string())?;
+    store
+        .set_setting(STALL_MINUTES_KEY, &settings.stall_minutes.to_string())
+        .map_err(|e| e.to_string())?;
+    store
+        .set_setting(SLOW_TOOL_MINUTES_KEY, &settings.slow_tool_minutes.to_string())
+        .map_err(|e| e.to_string())?;
     Ok(settings.clone())
+}
+
+/// Read settings only long enough to build the thresholds, then release the lock.
+/// The collector lock order must stay: settings, then collector, never reversed.
+fn thresholds(state: &Arc<AppState>) -> Thresholds {
+    let minutes = settings_read(&state.store.lock().unwrap()).unwrap_or_default();
+    Thresholds {
+        stall_ms: minutes.stall_minutes * 60_000,
+        slow_tool_ms: minutes.slow_tool_minutes * 60_000,
+    }
 }
 
 #[tauri::command]
@@ -974,7 +1016,7 @@ fn project_suggestions(
 ) -> Result<Vec<projects::ProjectSuggestion>, String> {
     let home = home_dir();
     let prices = state.pricing.lock().unwrap().clone();
-    let live = state.collector.lock().unwrap().snapshot(now_ms(), &prices);
+    let live = state.collector.lock().unwrap().snapshot(now_ms(), &prices, &thresholds(&state));
     let (known, saved_paths) = {
         let store = state.store.lock().map_err(|e| e.to_string())?;
         let known = store.known_project_dirs().map_err(|e| e.to_string())?;
@@ -1224,6 +1266,7 @@ mod tests {
         let input = Settings {
             attention_mode: "auto".into(),
             notify_sound: true,
+            ..Settings::default()
         };
         let saved = settings_write(&mut store, &input).unwrap();
         assert_eq!(saved, input);
@@ -1236,6 +1279,7 @@ mod tests {
         let bad = Settings {
             attention_mode: "turbo".into(),
             notify_sound: true,
+            ..Settings::default()
         };
         assert_eq!(
             settings_write(&mut store, &bad),
@@ -1252,6 +1296,47 @@ mod tests {
         let s = settings_read(&store).unwrap();
         assert_eq!(s.attention_mode, "notify");
         assert!(!s.notify_sound);
+    }
+
+    #[test]
+    fn settings_default_heartbeat_thresholds() {
+        let (_tmp, store) = settings_store();
+        let s = settings_read(&store).unwrap();
+        assert_eq!(s.stall_minutes, 5);
+        assert_eq!(s.slow_tool_minutes, 10);
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["stallMinutes"], 5);
+        assert_eq!(v["slowToolMinutes"], 10);
+    }
+
+    #[test]
+    fn settings_heartbeat_thresholds_round_trip() {
+        let (_tmp, mut store) = settings_store();
+        let input = Settings {
+            attention_mode: "auto".into(),
+            notify_sound: true,
+            stall_minutes: 3,
+            slow_tool_minutes: 20,
+        };
+        settings_write(&mut store, &input).unwrap();
+        let back = settings_read(&store).unwrap();
+        assert_eq!(back.stall_minutes, 3);
+        assert_eq!(back.slow_tool_minutes, 20);
+    }
+
+    #[test]
+    fn settings_reject_zero_minutes() {
+        let (_tmp, mut store) = settings_store();
+        let bad = Settings { stall_minutes: 0, ..Settings::default() };
+        assert_eq!(
+            settings_write(&mut store, &bad),
+            Err("menit harus minimal 1".to_string())
+        );
+        let bad = Settings { slow_tool_minutes: 0, ..Settings::default() };
+        assert_eq!(
+            settings_write(&mut store, &bad),
+            Err("menit harus minimal 1".to_string())
+        );
     }
 }
 
@@ -1296,10 +1381,15 @@ pub fn run() {
             std::thread::spawn(move || {
                 let mut last: Option<LiveSnapshot> = None;
                 loop {
-                    // The price lock is held only for the clone, never across the
-                    // emit or the sleep below.
+                    // The price and settings locks are held only for the clone,
+                    // never across the emit or the sleep below.
                     let prices = state.pricing.lock().unwrap().clone();
-                    let snap = state.collector.lock().unwrap().snapshot(now_ms(), &prices);
+                    let thresholds = thresholds(&state);
+                    let snap = state
+                        .collector
+                        .lock()
+                        .unwrap()
+                        .snapshot(now_ms(), &prices, &thresholds);
                     if last.as_ref().is_none_or(|l| !l.same_content(&snap)) {
                         let _ = handle.emit("live://snapshot", &snap);
                         last = Some(snap);

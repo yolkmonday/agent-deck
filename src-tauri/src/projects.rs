@@ -389,12 +389,17 @@ mod tests {
                     priced: false,
                     started_at_ms: None,
                     updated_at_ms: 0,
+                    quiet_ms: 0,
+                    tool_running_ms: None,
+                    health: collector::health::Health::Ok,
+                    health_reason: None,
                 })
                 .collect(),
             warnings: Vec::new(),
             generated_at_ms: 0,
             cost_usd: 0.0,
             unpriced: 0,
+            orphans: Vec::new(),
         }
     }
 

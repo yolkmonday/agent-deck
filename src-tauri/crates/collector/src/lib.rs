@@ -1,4 +1,5 @@
 pub mod claude;
+pub mod health;
 pub mod indexer;
 pub mod live;
 pub mod model;

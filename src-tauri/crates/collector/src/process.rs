@@ -11,6 +11,7 @@ pub trait ProcessTable: Send + Sync {
     fn is_alive(&self, pid: u32) -> bool;
     fn list(&self) -> Vec<ProcInfo>;
     fn cwd(&self, pid: u32) -> Option<String>;
+    fn start_time_ms(&self, pid: u32) -> Option<i64>;
 }
 
 pub struct SystemProcessTable;
@@ -47,6 +48,27 @@ impl ProcessTable for SystemProcessTable {
             .lines()
             .find_map(|l| l.strip_prefix('n').map(str::to_string))
     }
+
+    /// `etime` is elapsed seconds, so the age comes straight from the kernel and
+    /// there is no clock-format to parse or timezone to get wrong.
+    fn start_time_ms(&self, pid: u32) -> Option<i64> {
+        let out = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "etimes="])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let secs: i64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+        Some(now_ms() - secs * 1000)
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 #[derive(Default)]
@@ -54,6 +76,7 @@ pub struct FakeProcessTable {
     pub alive: HashSet<u32>,
     pub procs: Vec<ProcInfo>,
     pub cwds: HashMap<u32, String>,
+    pub start_times: HashMap<u32, i64>,
 }
 
 impl ProcessTable for FakeProcessTable {
@@ -65,5 +88,8 @@ impl ProcessTable for FakeProcessTable {
     }
     fn cwd(&self, pid: u32) -> Option<String> {
         self.cwds.get(&pid).cloned()
+    }
+    fn start_time_ms(&self, pid: u32) -> Option<i64> {
+        self.start_times.get(&pid).copied()
     }
 }

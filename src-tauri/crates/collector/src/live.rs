@@ -1,6 +1,7 @@
 use crate::claude::{read_claude_sessions, ClaudeLive};
-use crate::model::{Activity, ActivityKind, Agent, LiveSnapshot, Session, Status};
-use crate::opencode::{read_active, OpencodeLive};
+use crate::health::{self, Thresholds};
+use crate::model::{Activity, ActivityKind, Agent, LiveSnapshot, Orphan, Session, Status};
+use crate::opencode::{read_active, running_dirs, OpencodeLive};
 use crate::process::ProcessTable;
 use crate::pricing::PriceTable;
 use crate::transcript::{find_transcript, TranscriptState};
@@ -70,7 +71,7 @@ fn claude_activity(c: &ClaudeLive, st: &TranscriptState) -> Option<Activity> {
     })
 }
 
-fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable) -> Session {
+fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, thresholds: &Thresholds, now_ms: i64) -> Session {
     let activity = match (&o.running_tool, o.status) {
         (Some(t), _) => Some(Activity { kind: ActivityKind::Tool, label: t.clone(), detail: None }),
         (None, Status::Busy) => Some(Activity {
@@ -85,6 +86,10 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable) -> Session
         Some(m) if priced => prices.cost_usd(m, &o.tokens),
         _ => 0.0,
     };
+    let quiet_ms = (now_ms - o.updated_at_ms).max(0);
+    let tool_running_ms = o.running_tool.as_ref().and(o.tool_started_ms).map(|t| (now_ms - t).max(0));
+    let tool = o.running_tool.as_deref().zip(tool_running_ms);
+    let (health, health_reason) = health::evaluate(o.status, quiet_ms, tool, thresholds);
     Session {
         id: o.id,
         agent: Agent::Opencode,
@@ -100,6 +105,10 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable) -> Session
         priced,
         started_at_ms: None,
         updated_at_ms: o.updated_at_ms,
+        quiet_ms,
+        tool_running_ms,
+        health,
+        health_reason,
     }
 }
 
@@ -108,7 +117,7 @@ impl LiveCollector {
         Self { paths, procs, transcripts: HashMap::new() }
     }
 
-    fn claude_session(&mut self, c: ClaudeLive, prices: &PriceTable) -> Session {
+    fn claude_session(&mut self, c: ClaudeLive, prices: &PriceTable, thresholds: &Thresholds, now_ms: i64) -> Session {
         let projects = self.paths.claude_projects.clone();
         let (path, state) = self
             .transcripts
@@ -127,6 +136,16 @@ impl LiveCollector {
             Some(m) if priced => prices.cost_usd(m, &state.tokens),
             _ => 0.0,
         };
+        // A transcript record is the better signal when there is one; the session
+        // file's stamp is only a fallback for a session that never wrote one.
+        let quiet_ms = (now_ms - state.last_record_ms.unwrap_or(c.updated_at_ms)).max(0);
+        let tool_running_ms = state
+            .pending_tool_id
+            .as_ref()
+            .and(state.tool_started_ms)
+            .map(|t| (now_ms - t).max(0));
+        let tool = state.last_tool.as_ref().map(|t| t.name.as_str()).zip(tool_running_ms);
+        let (health, health_reason) = health::evaluate(c.status, quiet_ms, tool, thresholds);
         Session {
             id: c.session_id.clone(),
             agent: Agent::Claude,
@@ -142,10 +161,14 @@ impl LiveCollector {
             priced,
             started_at_ms: c.started_at_ms,
             updated_at_ms: c.updated_at_ms,
+            quiet_ms,
+            tool_running_ms,
+            health,
+            health_reason,
         }
     }
 
-    pub fn snapshot(&mut self, now_ms: i64, prices: &PriceTable) -> LiveSnapshot {
+    pub fn snapshot(&mut self, now_ms: i64, prices: &PriceTable, thresholds: &Thresholds) -> LiveSnapshot {
         let mut sessions = Vec::new();
         let mut warnings = Vec::new();
 
@@ -154,14 +177,21 @@ impl LiveCollector {
             claude.iter().map(|c| (c.session_id.clone(), c.cwd.clone())).collect();
         self.transcripts.retain(|key, _| live_ids.contains(key));
         for c in claude {
-            sessions.push(self.claude_session(c, prices));
+            sessions.push(self.claude_session(c, prices, thresholds, now_ms));
         }
 
+        let mut session_dirs: HashSet<String> = sessions.iter().map(|s| s.cwd.clone()).collect();
         match read_active(&self.paths.opencode_db, self.procs.as_ref(), now_ms) {
-            Ok(list) => sessions
-                .extend(list.into_iter().map(|o| opencode_session(o, &self.paths.home, prices))),
+            Ok(list) => {
+                for o in list {
+                    session_dirs.insert(o.directory.clone());
+                    sessions.push(opencode_session(o, &self.paths.home, prices, thresholds, now_ms));
+                }
+            }
             Err(e) => warnings.push(format!("opencode: {e}")),
         }
+
+        let orphans = self.orphans(now_ms, &session_dirs);
 
         sessions.sort_by(|a, b| {
             let wa = a.status == Status::Waiting;
@@ -170,13 +200,30 @@ impl LiveCollector {
         });
         let cost_usd = sessions.iter().map(|s| s.cost_usd).sum();
         let unpriced = sessions.iter().filter(|s| !s.priced).count();
-        LiveSnapshot { sessions, warnings, generated_at_ms: now_ms, cost_usd, unpriced }
+        LiveSnapshot { sessions, warnings, generated_at_ms: now_ms, cost_usd, unpriced, orphans }
+    }
+
+    /// An agent process whose directory has no session is the shape seen when a
+    /// delegated run stays alive without ever starting one. Only a process whose
+    /// age is known counts: guessing an age would invent a duration.
+    fn orphans(&self, now_ms: i64, session_dirs: &HashSet<String>) -> Vec<Orphan> {
+        let mut out: Vec<Orphan> = running_dirs(self.procs.as_ref())
+            .into_iter()
+            .filter(|(dir, _)| !session_dirs.contains(dir))
+            .filter_map(|(cwd, pid)| {
+                let age_ms = (now_ms - self.procs.start_time_ms(pid)?).max(0);
+                Some(Orphan { agent: Agent::Opencode, pid, cwd, age_ms })
+            })
+            .collect();
+        out.sort_by(|a, b| a.pid.cmp(&b.pid));
+        out
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::health::{Health, Thresholds};
     use crate::model::{ActivityKind, Agent};
     use crate::process::{FakeProcessTable, ProcInfo};
     use std::fs;
@@ -220,7 +267,7 @@ mod tests {
         procs.alive.insert(100);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
 
-        let snap = c.snapshot(2000, &PriceTable::defaults());
+        let snap = c.snapshot(2000, &PriceTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions.len(), 1);
         let s = &snap.sessions[0];
         assert_eq!(s.agent, Agent::Claude);
@@ -244,7 +291,7 @@ mod tests {
         let mut procs = FakeProcessTable::default();
         procs.alive.extend([1, 2, 3]);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
-        let ids: Vec<String> = c.snapshot(1000, &PriceTable::defaults()).sessions.into_iter().map(|s| s.id).collect();
+        let ids: Vec<String> = c.snapshot(1000, &PriceTable::defaults(), &Thresholds::defaults()).sessions.into_iter().map(|s| s.id).collect();
         assert_eq!(ids, vec!["b", "c", "a"]);
     }
 
@@ -259,7 +306,7 @@ mod tests {
         let mut procs = FakeProcessTable::default();
         procs.alive.insert(9);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
-        let a = c.snapshot(10, &PriceTable::defaults()).sessions[0].activity.clone().unwrap();
+        let a = c.snapshot(10, &PriceTable::defaults(), &Thresholds::defaults()).sessions[0].activity.clone().unwrap();
         assert_eq!(a.kind, ActivityKind::Waiting);
         assert_eq!(a.detail.as_deref(), Some("input needed"));
     }
@@ -282,7 +329,7 @@ mod tests {
         procs.alive.extend([1, 2]);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
 
-        let snap = c.snapshot(100, &PriceTable::defaults());
+        let snap = c.snapshot(100, &PriceTable::defaults(), &Thresholds::defaults());
         let a = snap.sessions.iter().find(|s| s.cwd.ends_with("/a")).unwrap();
         let b = snap.sessions.iter().find(|s| s.cwd.ends_with("/b")).unwrap();
         assert_eq!(a.tokens.output, 11);
@@ -299,7 +346,7 @@ mod tests {
         procs.alive.insert(1);
         procs.procs.push(ProcInfo { pid: 50, command: "/x/opencode run t --dir /d".into() });
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
-        let snap = c.snapshot(10, &PriceTable::defaults());
+        let snap = c.snapshot(10, &PriceTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions.len(), 1);
         assert_eq!(snap.warnings.len(), 1);
         assert!(snap.warnings[0].starts_with("opencode:"));
@@ -313,6 +360,12 @@ mod tests {
         let dir = paths.claude_projects.join(cwd.replace('/', "-"));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(format!("{sid}.jsonl")), format!("{body}\n")).unwrap();
+    }
+
+    fn append_line(path: &std::path::Path, body: &str) {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new().append(true).open(path).unwrap();
+        writeln!(f, "{body}").unwrap();
     }
 
     fn collector(paths: Paths, pids: &[u32]) -> LiveCollector {
@@ -333,7 +386,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(20, &PriceTable::defaults());
+        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
         let s = &snap.sessions[0];
         assert!(close(s.cost_usd, 15.0));
         assert!(s.priced);
@@ -353,7 +406,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(20, &PriceTable::defaults());
+        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
         let s = &snap.sessions[0];
         assert_eq!(s.cost_usd, 0.0);
         assert!(!s.priced);
@@ -366,7 +419,7 @@ mod tests {
         claude_session(&paths, 1, "s1", "/Users/yolk/Dev/kirimi", "busy", 10);
         let mut c = collector(paths, &[1]);
 
-        let snap = c.snapshot(20, &PriceTable::defaults());
+        let snap = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions[0].model, None);
         assert!(!snap.sessions[0].priced);
         assert_eq!(snap.unpriced, 1);
@@ -391,7 +444,7 @@ mod tests {
         );
         let mut c = collector(paths, &[1, 2]);
 
-        let snap = c.snapshot(30, &PriceTable::defaults());
+        let snap = c.snapshot(30, &PriceTable::defaults(), &Thresholds::defaults());
         let expected: f64 = snap.sessions.iter().map(|s| s.cost_usd).sum();
         assert!(close(snap.cost_usd, expected));
         assert!(close(snap.cost_usd, 90.0));
@@ -410,9 +463,124 @@ mod tests {
         );
         let mut c = collector(paths, &[1]);
 
-        let a = c.snapshot(20, &PriceTable::defaults());
+        let a = c.snapshot(20, &PriceTable::defaults(), &Thresholds::defaults());
         let mut b = a.clone();
         b.cost_usd += 1.0;
         assert!(!a.same_content(&b));
+    }
+
+    const MIN: i64 = 60_000;
+
+    fn assistant_at(ms: i64, body: &str) -> String {
+        format!("{{\"type\":\"assistant\",\"timestamp\":{ms},\"message\":{{{body}}}}}")
+    }
+
+    #[test]
+    fn quiet_ms_comes_from_the_last_transcript_record() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/a", "busy", 1);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/a",
+            "s1",
+            &assistant_at(500_000, "\"id\":\"m1\",\"usage\":{\"output_tokens\":1}"),
+        );
+        let mut c = collector(paths, &[1]);
+
+        let snap = c.snapshot(620_000, &PriceTable::defaults(), &Thresholds::defaults());
+        assert_eq!(snap.sessions[0].quiet_ms, 120_000);
+    }
+
+    #[test]
+    fn quiet_ms_falls_back_to_the_session_file() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/a", "busy", 500_000);
+        let mut c = collector(paths, &[1]);
+
+        let snap = c.snapshot(560_000, &PriceTable::defaults(), &Thresholds::defaults());
+        assert_eq!(snap.sessions[0].quiet_ms, 60_000);
+    }
+
+    #[test]
+    fn tool_running_ms_is_set_while_a_tool_is_open_and_cleared_after() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/a", "busy", 1);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/a",
+            "s1",
+            "{\"type\":\"assistant\",\"timestamp\":100000,\"message\":{\"id\":\"m1\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\",\"input\":{\"command\":\"bun test\"}}]}}",
+        );
+        let transcript = paths.claude_projects.join("-Users-yolk-Dev-a").join("s1.jsonl");
+        let mut c = collector(paths, &[1]);
+
+        let open = c.snapshot(160_000, &PriceTable::defaults(), &Thresholds::defaults());
+        assert_eq!(open.sessions[0].tool_running_ms, Some(60_000));
+
+        append_line(
+            &transcript,
+            "{\"type\":\"user\",\"timestamp\":200000,\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\"}]}}",
+        );
+        let closed = c.snapshot(260_000, &PriceTable::defaults(), &Thresholds::defaults());
+        assert_eq!(closed.sessions[0].tool_running_ms, None);
+    }
+
+    #[test]
+    fn a_long_quiet_busy_session_is_reported_stalled() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/a", "busy", 1);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/a",
+            "s1",
+            &assistant_at(100_000, "\"id\":\"m1\",\"usage\":{\"output_tokens\":1}"),
+        );
+        let mut c = collector(paths, &[1]);
+
+        let snap = c.snapshot(100_000 + 6 * MIN, &PriceTable::defaults(), &Thresholds::defaults());
+        let s = &snap.sessions[0];
+        assert_eq!(s.health, Health::Stalled);
+        assert!(s.health_reason.as_deref().is_some_and(|r| !r.is_empty()));
+    }
+
+    #[test]
+    fn an_orphan_opencode_process_is_reported() {
+        let (_tmp, paths) = setup();
+        let mut procs = FakeProcessTable::default();
+        procs.procs.push(ProcInfo { pid: 77, command: "/x/opencode run t --dir /x/y".into() });
+        procs.start_times.insert(77, 400_000);
+        let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
+
+        let snap = c.snapshot(1_000_000, &PriceTable::defaults(), &Thresholds::defaults());
+        assert_eq!(snap.orphans.len(), 1);
+        let o = &snap.orphans[0];
+        assert_eq!(o.pid, 77);
+        assert_eq!(o.cwd, "/x/y");
+        assert_eq!(o.agent, Agent::Opencode);
+        assert_eq!(o.age_ms, 600_000);
+    }
+
+    #[test]
+    fn no_orphan_when_the_directory_has_a_session() {
+        let (_tmp, paths) = setup();
+        fs::create_dir_all(paths.opencode_db.parent().unwrap()).unwrap();
+        let db = &paths.opencode_db;
+        let conn = rusqlite::Connection::open(db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, directory TEXT, title TEXT, agent TEXT, model TEXT, cost REAL, tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+             INSERT INTO session VALUES ('sa','p',NULL,'/x/y','t','build','{\"id\":\"m\",\"providerID\":\"kn\"}',0,1,1,0,0,0,1,990000,NULL);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let mut procs = FakeProcessTable::default();
+        procs.procs.push(ProcInfo { pid: 77, command: "/x/opencode run t --dir /x/y".into() });
+        procs.start_times.insert(77, 400_000);
+        let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
+
+        let snap = c.snapshot(1_000_000, &PriceTable::defaults(), &Thresholds::defaults());
+        assert_eq!(snap.sessions.len(), 1);
+        assert!(snap.orphans.is_empty());
     }
 }
