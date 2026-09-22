@@ -6,14 +6,14 @@
 
 **Spec:** Two requests from the user on the running app, 2026-09-22. Reference for the thinking line: `brainless.swerdlow.dev`, a shadcn registry that mirrors the Claude Code / Codex / Grok interfaces. Its thinking row pairs a marker with elapsed time (`Thinking… (0s · ↑ 0 tokens · esc to interrupt)`) rather than showing a bare spinner — the useful part is the elapsed time, and that is what we copy.
 
-**Depends on:** P12, which adds `quietMs` to `Session`. The thinking duration is read from it.
+**Depends on:** P12, which adds `quietMs` and `toolRunningMs` to `Session`. Durations are read from those, never from a component-local stopwatch.
 
 ## Constraints
 
-- No new dependency. Animation is CSS keyframes in `src/index.css`, not a library.
-- **Respect `prefers-reduced-motion`.** Under that setting the dots hold at a steady opacity
-  instead of pulsing. Motion that cannot be turned off is an accessibility failure, and it costs
-  four lines to do right.
+- No new npm dependency. The animation comes from the brainless component, which ships its own CSS.
+- **Respect `prefers-reduced-motion`.** The brainless component already does; keep that intact
+  rather than overriding its styles. Motion that cannot be turned off is an accessibility failure.
+
 - Animate only what is genuinely in progress: `thinking` and a running `tool`. A card that is
   `Diam` or `Selesai` stays still, or the board becomes a christmas tree.
 - Keep the existing colour tokens and spacing. This is a small addition, not a redesign.
@@ -23,42 +23,38 @@
 
 ## Changes
 
-### 1. Keyframes — `src/index.css`
+### 1. The thinking component comes from brainless — DONE
 
-```css
-@keyframes ad-dot {
-  0%, 80%, 100% { opacity: 0.2; }
-  40% { opacity: 1; }
-}
+`bunx shadcn@latest add @brainless/claude-thinking` installed
+`src/components/brainless/claude/claude-thinking.tsx`. It is self-contained: no npm dependency, no
+`cn()`, its own `<style>` block, `role="status"` + `aria-live="polite"`, and it already honours
+`prefers-reduced-motion`.
 
-.ad-dot { animation: ad-dot 1.4s ease-in-out infinite; }
-.ad-dot:nth-child(2) { animation-delay: 0.16s; }
-.ad-dot:nth-child(3) { animation-delay: 0.32s; }
+Two local additions were made to it, because the upstream defaults are dishonest **in a dashboard**
+(they are perfectly fine in the terminal replica it was written for):
 
-@media (prefers-reduced-motion: reduce) {
-  .ad-dot { animation: none; opacity: 0.6; }
-}
-```
+- The token counter is **estimated**, not measured: upstream computes `secs * 137`. Agent Deck shows
+  real token counts two lines below, so a fabricated number next to a real one would poison trust in
+  both. Pass `showTokens={false}`.
+- `esc to interrupt` is hardcoded upstream and is **false here** — pressing esc in the dashboard does
+  nothing to a session it does not own. A new `hint?: string | null` prop was added; pass
+  `hint={null}` on the card.
+- A new `elapsedMs?: number` prop was added so the measured duration from the backend replaces the
+  component's own stopwatch, which would otherwise restart on every re-render.
 
-### 2. `ThinkingDots` — `src/components/ThinkingDots.tsx`
+### 2. Activity line — `src/components/SessionCard.tsx`
 
-A three-dot row: `<span className="ad-dot size-1 rounded-full bg-current" />` three times, wrapped in
-`inline-flex items-center gap-1`, inheriting `currentColor` so the caller picks the colour.
-
-### 3. Activity line — `src/components/SessionCard.tsx`
-
-- `thinking`: label becomes `Berpikir` + `ThinkingDots` + the elapsed time from `quietMs`, rendered
-  with the existing `formatDuration`, e.g. `Berpikir ··· 1 mnt`. Under a minute, show seconds:
-  add `formatShort(ms)` to `src/lib/format.ts` returning `"12 dtk"` below 60 s and delegating to
-  `formatDuration` above it.
-- `tool` while running: the tool name keeps its current styling but gains a small `Loader`
-  (lucide `loader-circle`) with `animate-spin` at 12 px, plus the elapsed tool time when P12's
-  `toolRunningMs` is non-null.
+- `thinking`: render `<ClaudeThinking verbs={["Berpikir"]} showTokens={false} hint={null} elapsedMs={s.quietMs} />`.
+  A single verb, not the upstream rotation (`Levitating`, `Schlepping`, `Percolating`): whimsy reads
+  well in a terminal, but on a status board it implies the dashboard knows what the agent is doing
+  when it does not.
+- `tool` while running: keep the current styling, add the elapsed tool time from P12's
+  `toolRunningMs` via `formatShort`. No extra spinner — the status pill already says `Sibuk`.
 - `done`, `waiting`, `idle`: unchanged, no motion.
-- The busy colour (`--color-busy`) carries the thinking state; the waiting colour stays reserved for
-  sessions that need a human.
+- Colour: the component hardcodes terracotta `#cd694a`, which is close to our `--color-claude`
+  (`#E8825C`). Leave it; it reads as the Claude brand colour and matches the agent icon beside it.
 
-### 4. Collapsible feed — `src/pages/LivePage.tsx`, `src/components/ActivityFeed.tsx`
+### 3. Collapsible feed — `src/pages/LivePage.tsx`, `src/components/ActivityFeed.tsx`
 
 - `LivePage` owns `const [feedOpen, setFeedOpen] = useState(readFeedOpen())`, where `readFeedOpen`
   reads `localStorage["ad.feedOpen"]` inside try/catch and defaults to `true`.
@@ -70,7 +66,7 @@ A three-dot row: `<span className="ad-dot size-1 rounded-full bg-current" />` th
 - Every write to `localStorage` is wrapped in try/catch and failure is ignored — the toggle must
   still work for the session even if storage is blocked.
 
-### 5. `formatShort` — `src/lib/format.ts` and its test
+### 4. `formatShort` — `src/lib/format.ts` and its test
 
 ```ts
 export const formatShort = (ms: number): string =>
