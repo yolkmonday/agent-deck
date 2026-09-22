@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import type { PageKey } from "@/lib/nav";
 import { LivePage } from "@/pages/LivePage";
+import { SavingsPage } from "@/pages/SavingsPage";
 import { TimelinePage } from "@/pages/TimelinePage";
 import { TokenPage } from "@/pages/TokenPage";
 import { startLive } from "@/store/live";
@@ -10,7 +11,7 @@ const PAGES: Record<PageKey, () => React.ReactElement> = {
   live: LivePage,
   token: TokenPage,
   timeline: TimelinePage,
-  savings: LivePage,
+  savings: SavingsPage,
   terminal: LivePage,
   provider: LivePage,
 };
