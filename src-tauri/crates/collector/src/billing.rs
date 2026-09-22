@@ -57,6 +57,26 @@ pub fn parse_date_iso(s: &str) -> Option<Date> {
     parse_date(s)
 }
 
+/// The local calendar day an instant falls on, as a `Date`. The offset is taken
+/// from the system clock (`local-offset`), which is the same wall clock the rest
+/// of the app uses for daily buckets.
+pub fn local_date(now_ms: i64) -> Date {
+    let secs = now_ms.div_euclid(1000);
+    let dt = time::OffsetDateTime::from_unix_timestamp(secs)
+        .ok()
+        .map(|t| t.to_offset(time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC)))
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    dt.date()
+}
+
+/// Midnight local time on `d`, as milliseconds since the epoch. Used to turn a
+/// cycle boundary into a query window.
+pub fn start_of_day_ms(d: Date) -> i64 {
+    (d - Date::from_calendar_date(1970, Month::January, 1).expect("epoch"))
+        .whole_days()
+        * 86_400_000
+}
+
 /// A renewal day above 28 is pushed back to 28 rather than clamped per month, so
 /// every month has the day and no cycle is skipped.
 fn renewal_day(account: &BillingAccount) -> u32 {

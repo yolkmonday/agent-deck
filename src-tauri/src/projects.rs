@@ -388,6 +388,7 @@ mod tests {
                     own_tokens: Default::default(),
                     subagents: Vec::new(),
                     cost_usd: 0.0,
+                    billing_mode: collector::billing::BillingMode::Payg,
                     priced: false,
                     started_at_ms: None,
                     updated_at_ms: 0,

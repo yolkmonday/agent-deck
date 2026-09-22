@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::billing::BillingMode;
 use crate::health::Health;
 use crate::subagent::SubAgent;
 
@@ -88,6 +89,9 @@ pub struct Session {
     pub own_tokens: TokenUsage,
     pub subagents: Vec<SubAgent>,
     pub cost_usd: f64,
+    /// How the model behind `cost_usd` is paid for. `cost_usd` keeps meaning
+    /// "these tokens at API rates"; the UI labels it by this mode.
+    pub billing_mode: BillingMode,
     pub priced: bool,
     pub started_at_ms: Option<i64>,
     pub updated_at_ms: i64,
@@ -156,7 +160,7 @@ mod tests {
             id: "s1".into(), agent: Agent::Claude, pid: Some(1), project: "p".into(), cwd: "/p".into(),
             model: None, branch: None, status: Status::Waiting, activity: None,
             tokens: TokenUsage::default(), own_tokens: TokenUsage::default(), subagents: vec![],
-            cost_usd: 0.0, priced: false,
+            cost_usd: 0.0, billing_mode: BillingMode::Payg, priced: false,
             started_at_ms: None, updated_at_ms: 5,
             quiet_ms: 0, tool_running_ms: None, health: Health::Ok, health_reason: None,
         };
@@ -168,6 +172,7 @@ mod tests {
         assert_eq!(v["ownTokens"]["cacheRead"], 0);
         assert_eq!(v["subagents"], serde_json::json!([]));
         assert_eq!(v["costUsd"], 0.0);
+        assert_eq!(v["billingMode"], "payg");
         assert_eq!(v["priced"], false);
         assert_eq!(v["quietMs"], 0);
         assert_eq!(v["toolRunningMs"], serde_json::Value::Null);
