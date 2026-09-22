@@ -14,11 +14,13 @@ version = "0.1.0"
 dependencies = [
  "collector",
  "dirs 5.0.1",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
+ "tempfile",
 ]
 
 [[package]]
