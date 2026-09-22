@@ -79,12 +79,20 @@ impl TranscriptState {
             *self = TranscriptState::default();
         }
         loop {
-            file.seek(SeekFrom::Start(self.offset))?;
-            let mut buf = Vec::new();
-            (&mut file).take(CHUNK).read_to_end(&mut buf)?;
-            let Some(last_newline) = buf.iter().rposition(|b| *b == b'\n') else {
-                break;
+            let mut read_size = CHUNK;
+            let buf = loop {
+                file.seek(SeekFrom::Start(self.offset))?;
+                let mut buf = Vec::new();
+                (&mut file).take(read_size).read_to_end(&mut buf)?;
+                if buf.iter().rposition(|b| *b == b'\n').is_some() {
+                    break buf;
+                }
+                if (buf.len() as u64) < read_size {
+                    return Ok(());
+                }
+                read_size = read_size.saturating_mul(2);
             };
+            let last_newline = buf.iter().rposition(|b| *b == b'\n').unwrap();
             let complete = last_newline + 1;
             for line in buf[..complete].split(|b| *b == b'\n') {
                 if line.is_empty() {
@@ -95,7 +103,7 @@ impl TranscriptState {
                 }
             }
             self.offset += complete as u64;
-            if (buf.len() as u64) < CHUNK {
+            if (buf.len() as u64) < read_size {
                 break;
             }
         }
@@ -250,6 +258,26 @@ mod tests {
         append(&p, "}}\n");
         st.advance(&p).unwrap();
         assert_eq!(st.tokens.output, 7);
+    }
+
+    #[test]
+    fn line_larger_than_chunk_is_consumed_and_does_not_stall() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("s.jsonl");
+        let big = "x".repeat(CHUNK as usize + 1024);
+        let huge_line = format!(
+            "{{\"type\":\"user\",\"message\":{{\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"t0\",\"content\":\"{big}\"}}]}}}}\n"
+        );
+        append(&p, &huge_line);
+        append(&p, "{\"type\":\"assistant\",\"message\":{\"id\":\"after\",\"usage\":{\"output_tokens\":42}}}\n");
+
+        let mut st = TranscriptState::default();
+        st.advance(&p).unwrap();
+        assert_eq!(st.tokens.output, 42, "line after the oversized record must be read");
+
+        append(&p, "{\"type\":\"assistant\",\"message\":{\"id\":\"later\",\"usage\":{\"output_tokens\":8}}}\n");
+        st.advance(&p).unwrap();
+        assert_eq!(st.tokens.output, 50, "tailer must keep progressing afterwards");
     }
 
     #[test]
