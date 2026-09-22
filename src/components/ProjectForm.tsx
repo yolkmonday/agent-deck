@@ -108,7 +108,7 @@ export const ProjectForm = ({
           <button
             type="button"
             onClick={onCancel}
-            className="cursor-pointer rounded-md px-2 py-1 text-xs text-fg-3 hover:text-fg"
+            className="ad-interactive ad-press cursor-pointer rounded-md px-2 py-1 text-xs text-fg-3 hover:text-fg"
           >
             Batal
           </button>
@@ -139,7 +139,7 @@ export const ProjectForm = ({
             type="button"
             disabled={picking}
             onClick={() => void browse()}
-            className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-[11.5px] font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
+            className="ad-interactive ad-press flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-[11.5px] font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
           >
             <Icon icon="lucide:folder-open" width={13} height={13} />
             {picking ? "Membuka…" : "Pilih folder…"}
@@ -179,7 +179,7 @@ export const ProjectForm = ({
               type="button"
               aria-label={p.value}
               onClick={() => patch({ color: draft.color === p.value ? null : p.value })}
-              className={`size-6 cursor-pointer rounded-full ${p.token} ${
+              className={`ad-interactive ad-press size-6 cursor-pointer rounded-full hover:opacity-80 ${p.token} ${
                 draft.color === p.value ? "ring-2 ring-fg ring-offset-2 ring-offset-surface" : ""
               }`}
             />
@@ -187,7 +187,7 @@ export const ProjectForm = ({
           <button
             type="button"
             onClick={() => patch({ color: null })}
-            className={`cursor-pointer rounded-md border px-2.5 py-1 text-[11.5px] ${
+            className={`ad-interactive ad-press cursor-pointer rounded-md border px-2.5 py-1 text-[11.5px] hover:border-fg-3 hover:text-fg ${
               draft.color === null ? "border-fg text-fg" : "border-border text-fg-3"
             }`}
           >
@@ -201,7 +201,7 @@ export const ProjectForm = ({
           type="button"
           disabled={!canSave}
           onClick={() => onSubmit({ ...draft, name: draft.name.trim(), path: draft.path.trim() })}
-          className="cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg disabled:cursor-default disabled:opacity-45"
+          className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
         >
           {busy ? "Menyimpan…" : editing === null ? "Tambah" : "Simpan"}
         </button>

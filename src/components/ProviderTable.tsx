@@ -64,7 +64,7 @@ export const ProviderTable = ({
               <tr
                 key={p.id}
                 onClick={() => onOpen(p.id)}
-                className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-surface-2"
+                className="ad-interactive cursor-pointer border-b border-border/60 last:border-0 hover:bg-surface-2"
               >
                 <td className="py-3 pr-4">
                   <div className="flex items-center gap-2.5">
@@ -141,7 +141,7 @@ export const ProviderTable = ({
               type="button"
               disabled={busyId === p.id}
               onClick={() => migrate.mutate(p.id)}
-              className="cursor-pointer rounded-md border border-waiting/50 px-2.5 py-1 text-[11.5px] font-medium text-waiting disabled:cursor-default disabled:opacity-45"
+              className="ad-interactive ad-press cursor-pointer rounded-md border border-waiting/50 px-2.5 py-1 text-[11.5px] font-medium text-waiting hover:bg-waiting/10 disabled:cursor-default disabled:opacity-45"
             >
               {busyId === p.id ? "Memindahkan…" : "Pindahkan ke file 0600"}
             </button>

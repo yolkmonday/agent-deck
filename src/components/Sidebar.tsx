@@ -27,9 +27,7 @@ export const Sidebar = ({
               type="button"
               disabled={!enabled}
               onClick={() => onSelect(key)}
-              className={`flex items-center gap-2.5 rounded-lg px-3 py-2.25 text-left text-[13.5px] ${
-                active ? "bg-surface-2 font-semibold text-fg" : "font-medium text-fg-3"
-              } ${enabled ? "cursor-pointer" : "cursor-default opacity-45"}`}
+              className={`ad-interactive ad-press flex items-center gap-2.5 rounded-lg px-3 py-2.25 text-left text-[13.5px] ${active ? "bg-surface-2 font-semibold text-fg" : "font-medium text-fg-3 hover:text-fg"} ${enabled ? "cursor-pointer" : "cursor-default opacity-45"}`}
             >
               <Icon size={16} />
               <span className="flex-1">{label}</span>
@@ -47,7 +45,7 @@ export const Sidebar = ({
                     e.stopPropagation();
                     onJumpWaiting();
                   }}
-                  className="cursor-pointer rounded-full bg-waiting px-1.75 py-0.5 text-[11px] font-semibold text-bg"
+                  className="ad-interactive ad-press cursor-pointer rounded-full bg-waiting px-1.75 py-0.5 text-[11px] font-semibold text-bg hover:opacity-90"
                 >
                   {waitingCount} tunggu
                 </span>

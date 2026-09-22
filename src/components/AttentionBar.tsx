@@ -56,7 +56,7 @@ export const AttentionBar = ({
           <button
             type="button"
             onClick={onJump}
-            className={`ml-auto shrink-0 cursor-pointer rounded-md px-3 py-1.25 text-[12px] font-semibold text-bg ${
+            className={`ad-interactive ad-press ml-auto shrink-0 cursor-pointer rounded-md px-3 py-1.25 text-[12px] font-semibold text-bg hover:opacity-90 ${
               tone === "waiting" ? "bg-waiting" : "bg-err"
             }`}
           >
@@ -68,7 +68,7 @@ export const AttentionBar = ({
             type="button"
             onClick={() => setOpen((v) => !v)}
             title="Pengaturan notifikasi"
-            className="cursor-pointer rounded-md border border-border p-1.5 text-fg-2"
+            className="ad-interactive ad-press cursor-pointer rounded-md border border-border p-1.5 text-fg-2 hover:border-fg-3 hover:text-fg"
           >
             <Settings size={14} />
           </button>

@@ -124,7 +124,7 @@ export const ProjectPage = () => {
         <button
           type="button"
           onClick={() => setEditing(null)}
-          className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3.5 py-2 text-[13px] font-medium text-fg-2 hover:text-fg"
+          className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3.5 py-2 text-[13px] font-medium text-fg-2 hover:text-fg"
         >
           <Plus size={15} />
           Project baru
@@ -204,7 +204,7 @@ export const ProjectPage = () => {
                       <button
                         type="button"
                         onClick={() => prefill(s.name, s.path)}
-                        className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] font-medium text-fg-2 hover:text-fg"
+                        className="ad-interactive ad-press shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] font-medium text-fg-2 hover:text-fg"
                       >
                         Tambah
                       </button>

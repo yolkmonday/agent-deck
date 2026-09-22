@@ -95,7 +95,7 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
             type="button"
             title="Tampilkan 15 detik"
             onClick={() => (revealed === null ? reveal.mutate() : remask())}
-            className="cursor-pointer rounded-md border border-border p-2 text-fg-3 hover:text-fg"
+            className="ad-interactive ad-press cursor-pointer rounded-md border border-border p-2 text-fg-3 hover:bg-surface-2 hover:text-fg"
           >
             {revealed === null ? <Eye size={15} /> : <EyeOff size={15} />}
           </button>
@@ -107,7 +107,7 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
               type="button"
               disabled={draft.trim() === "" || save.isPending}
               onClick={() => save.mutate(draft.trim())}
-              className="cursor-pointer rounded-md bg-busy px-3 py-2 text-xs font-semibold text-bg disabled:cursor-default disabled:opacity-45"
+              className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-3 py-2 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
             >
               {save.isPending ? "Menyimpan…" : "Simpan"}
             </button>
@@ -117,7 +117,7 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
                 setEditing(false);
                 setDraft("");
               }}
-              className="cursor-pointer rounded-md border border-border px-3 py-2 text-xs text-fg-2"
+              className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-2 text-xs text-fg-2 hover:border-fg-3 hover:text-fg"
             >
               Batal
             </button>
@@ -130,7 +130,7 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
                 remask();
                 setEditing(true);
               }}
-              className="cursor-pointer rounded-md border border-border px-3 py-2 text-xs text-fg-2 hover:text-fg"
+              className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-2 text-xs text-fg-2 hover:border-fg-3 hover:text-fg"
             >
               {keyMasked === null ? "Isi key" : "Ganti"}
             </button>
@@ -140,7 +140,7 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
                 title="Hapus key"
                 disabled={clear.isPending}
                 onClick={() => clear.mutate()}
-                className="cursor-pointer rounded-md border border-border p-2 text-fg-3 hover:text-err disabled:cursor-default disabled:opacity-45"
+                className="ad-interactive ad-press cursor-pointer rounded-md border border-border p-2 text-fg-3 hover:bg-err/10 hover:text-err disabled:cursor-default disabled:opacity-45"
               >
                 <Trash2 size={15} />
               </button>

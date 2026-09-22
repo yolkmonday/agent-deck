@@ -18,7 +18,11 @@ export const TerminalTabs = ({ onClose }: { onClose: (id: string) => void }) => 
             s.id === activeId ? "border-border bg-surface-2 font-semibold" : "border-transparent text-fg-2"
           }`}
         >
-          <button type="button" onClick={() => select(s.id)} className="flex cursor-pointer items-center gap-2">
+          <button
+            type="button"
+            onClick={() => select(s.id)}
+            className="ad-interactive ad-press flex cursor-pointer items-center gap-2 hover:text-fg"
+          >
             <AgentIcon
               agent={(s.profileId as keyof typeof AGENT_TEXT) in AGENT_TEXT ? (s.profileId as "claude" | "opencode" | "codex") : "claude"}
               size={14}
@@ -31,7 +35,7 @@ export const TerminalTabs = ({ onClose }: { onClose: (id: string) => void }) => 
             type="button"
             onClick={() => onClose(s.id)}
             title="Tutup sesi"
-            className="cursor-pointer text-fg-3 hover:text-err"
+            className="ad-interactive ad-press cursor-pointer text-fg-3 hover:text-err"
           >
             <X size={13} />
           </button>

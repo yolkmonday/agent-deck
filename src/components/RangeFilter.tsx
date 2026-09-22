@@ -25,9 +25,7 @@ export const RangeFilter = ({
           key={days}
           type="button"
           onClick={() => onChange(days)}
-          className={`cursor-pointer rounded-md px-2.75 py-1.5 text-xs font-medium ${
-            active ? "bg-surface-2 text-fg" : "text-fg-3 hover:text-fg-2"
-          }`}
+          className={`ad-interactive ad-press cursor-pointer rounded-md px-2.75 py-1.5 text-xs font-medium ${active ? "bg-surface-2 text-fg" : "text-fg-3 hover:text-fg-2"}`}
         >
           {label}
         </button>

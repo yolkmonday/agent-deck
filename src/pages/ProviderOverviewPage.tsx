@@ -22,7 +22,7 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
         <button
           type="button"
           onClick={onNew}
-          className="flex cursor-pointer items-center gap-1.5 rounded-md bg-busy px-3.5 py-2 text-[13px] font-semibold text-bg"
+          className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md bg-busy px-3.5 py-2 text-[13px] font-semibold text-bg hover:opacity-90"
         >
           <Plus size={15} />
           Provider baru

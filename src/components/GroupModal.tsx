@@ -72,7 +72,7 @@ const Row = ({ s, onOpenTerminal }: { s: Session; onOpenTerminal: (id?: string) 
     <button
       type="button"
       onClick={() => onOpenTerminal()}
-      className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] font-semibold text-fg-2"
+      className="ad-interactive ad-press shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] font-semibold text-fg-2 hover:border-fg-3 hover:text-fg"
     >
       Terminal
     </button>
@@ -120,7 +120,7 @@ export const GroupModal = ({
             type="button"
             onClick={onClose}
             aria-label="Tutup"
-            className="cursor-pointer text-fg-3 hover:text-fg"
+            className="ad-interactive ad-press cursor-pointer text-fg-3 hover:text-fg"
           >
             <Icon icon="lucide:x" width={16} height={16} />
           </button>

@@ -6,9 +6,9 @@ const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "te
 const agentName = { claude: "Claude", opencode: "opencode", codex: "Codex" } as const;
 
 const spanClass: Record<TimelineSpan["status"], string> = {
-  ok: "border-busy/60 bg-busy/25 hover:bg-busy/40",
-  error: "border-err/60 bg-err/25 hover:bg-err/40",
-  running: "border-waiting/60 bg-waiting/25 hover:bg-waiting/40",
+  ok: "ad-interactive border-busy/60 bg-busy/25 hover:bg-busy/40",
+  error: "ad-interactive border-err/60 bg-err/25 hover:bg-err/40",
+  running: "ad-interactive border-waiting/60 bg-waiting/25 hover:bg-waiting/40",
 };
 
 export const TimelineLane = ({
@@ -52,7 +52,7 @@ export const TimelineLane = ({
             title={s.detail ? `${s.tool}: ${s.detail}` : s.tool}
             onClick={() => onSelect(s)}
             style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-            className={`absolute top-2 bottom-2 cursor-pointer overflow-hidden rounded-[3px] border text-left transition-colors ${spanClass[s.status]} ${
+            className={`ad-press absolute top-2 bottom-2 cursor-pointer overflow-hidden rounded-[3px] border text-left ${spanClass[s.status]} ${
               selected ? "ring-1 ring-fg/70" : ""
             }`}
           />

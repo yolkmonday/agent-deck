@@ -14,14 +14,14 @@ const ConfirmDialog = ({ label, onCancel, onConfirm }: { label: string; onCancel
         <button
           type="button"
           onClick={onCancel}
-          className="cursor-pointer rounded-md border border-border px-3.5 py-2 text-[13px] text-fg-2"
+          className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3.5 py-2 text-[13px] text-fg-2 hover:border-fg-3 hover:text-fg"
         >
           Batal
         </button>
         <button
           type="button"
           onClick={onConfirm}
-          className="cursor-pointer rounded-md bg-err px-3.5 py-2 text-[13px] font-semibold text-bg"
+          className="ad-interactive ad-press cursor-pointer rounded-md bg-err px-3.5 py-2 text-[13px] font-semibold text-bg hover:opacity-90"
         >
           Hentikan
         </button>
@@ -57,7 +57,7 @@ export const TerminalPage = ({ initialSessionId }: { initialSessionId?: string |
         <button
           type="button"
           onClick={() => setDialogOpen(true)}
-          className="flex cursor-pointer items-center gap-1.5 rounded-md bg-busy px-3.5 py-2 text-[13px] font-semibold text-bg"
+          className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md bg-busy px-3.5 py-2 text-[13px] font-semibold text-bg hover:opacity-90"
         >
           <Plus size={15} />
           Sesi baru

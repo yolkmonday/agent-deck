@@ -46,14 +46,14 @@ export const TokenPage = () => {
           <button
             type="button"
             onClick={() => setBilling(true)}
-            className="cursor-pointer rounded-lg border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
+            className="ad-interactive ad-press cursor-pointer rounded-lg border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:border-fg-3 hover:text-fg"
           >
             Langganan &amp; saldo
           </button>
           <button
             type="button"
             onClick={() => setPricing(true)}
-            className="cursor-pointer rounded-lg border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
+            className="ad-interactive ad-press cursor-pointer rounded-lg border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:border-fg-3 hover:text-fg"
           >
             Harga model
           </button>

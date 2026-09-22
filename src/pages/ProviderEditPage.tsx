@@ -73,14 +73,14 @@ const BackupMenu = ({ onClose }: { onClose: () => void }) => {
                         type="button"
                         onClick={() => restore.mutate(b.path)}
                         disabled={restore.isPending}
-                        className="cursor-pointer rounded-md bg-err px-3 py-1.5 text-[11.5px] font-semibold text-bg disabled:cursor-default disabled:opacity-45"
+                        className="ad-interactive ad-press cursor-pointer rounded-md bg-err px-3 py-1.5 text-[11.5px] font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
                       >
                         {restore.isPending ? "Memulihkan…" : "Yakin?"}
                       </button>
                       <button
                         type="button"
                         onClick={() => setPending(null)}
-                        className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[11.5px] text-fg-2"
+                        className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-1.5 text-[11.5px] text-fg-2 hover:border-fg-3 hover:text-fg"
                       >
                         Batal
                       </button>
@@ -89,7 +89,7 @@ const BackupMenu = ({ onClose }: { onClose: () => void }) => {
                     <button
                       type="button"
                       onClick={() => setPending(b.path)}
-                      className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[11.5px] text-fg-2 hover:text-fg"
+                      className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-1.5 text-[11.5px] text-fg-2 hover:border-fg-3 hover:text-fg"
                     >
                       Pulihkan
                     </button>
@@ -190,7 +190,7 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
     <button
       type="button"
       onClick={() => nav.provider("")}
-      className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
+              className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
     >
       <ArrowLeft size={14} />
       Kembali
@@ -237,7 +237,7 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
             <button
               type="button"
               onClick={() => setBackups(true)}
-              className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
+      className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
             >
               <History size={14} />
               Pulihkan
@@ -326,11 +326,11 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
               <button
                 type="button"
                 onClick={() => patch({ enabled: !draft.enabled })}
-                className={`relative h-5.5 w-10 shrink-0 cursor-pointer rounded-full ${draft.enabled ? "bg-busy" : "bg-surface-2"}`}
+                className={`ad-interactive ad-press relative h-5.5 w-10 shrink-0 cursor-pointer rounded-full hover:opacity-90 ${draft.enabled ? "bg-busy" : "bg-surface-2"}`}
               >
                 <span
-                  className={`absolute top-0.75 size-4 rounded-full bg-fg transition-all ${
-                    draft.enabled ? "left-5.25" : "left-0.75"
+                  className={`absolute top-0.75 left-0.75 size-4 rounded-full bg-fg transition-transform duration-base ease-out-quart ${
+                    draft.enabled ? "translate-x-4.5" : "translate-x-0"
                   }`}
                 />
               </button>
@@ -344,7 +344,7 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
                     key={style}
                     type="button"
                     onClick={() => patch({ headerStyle: style, customHeaderName: style === "custom" ? draft.customHeaderName : null })}
-                    className={`flex-1 cursor-pointer rounded px-3 py-1.5 text-[12.5px] ${
+                    className={`ad-interactive ad-press flex-1 cursor-pointer rounded px-3 py-1.5 text-[12.5px] hover:text-fg ${
                       draft.headerStyle === style ? "bg-surface-2 font-semibold text-fg" : "text-fg-3"
                     }`}
                   >
@@ -381,7 +381,7 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
                 type="button"
                 disabled={migrate.isPending}
                 onClick={() => migrate.mutate(existing.id)}
-                className="cursor-pointer rounded-md border border-waiting/50 px-3 py-1.75 text-xs font-medium text-waiting disabled:cursor-default disabled:opacity-45"
+                className="ad-interactive ad-press cursor-pointer rounded-md border border-waiting/50 px-3 py-1.75 text-xs font-medium text-waiting hover:bg-waiting/10 disabled:cursor-default disabled:opacity-45"
               >
                 {migrate.isPending ? "Memindahkan…" : "Pindahkan key ke file 0600"}
               </button>
@@ -392,7 +392,7 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
                 type="button"
                 disabled={!canSave || save.isPending}
                 onClick={() => save.mutate(draft)}
-                className="cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg disabled:cursor-default disabled:opacity-45"
+                className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
               >
                 {save.isPending ? "Menyimpan…" : "Simpan"}
               </button>
@@ -403,7 +403,7 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
                   onClick={() => {
                     if (confirm(`Hapus provider ${draft.id}? File key tidak ikut dihapus.`)) remove.mutate(draft.id);
                   }}
-                  className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-err disabled:cursor-default disabled:opacity-45"
+                  className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-err disabled:cursor-default disabled:opacity-45"
                 >
                   <Trash2 size={14} />
                   Hapus provider

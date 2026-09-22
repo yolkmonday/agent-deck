@@ -37,7 +37,7 @@ export const ActivityPage = () => {
               key={f.key}
               type="button"
               onClick={() => setFilter(f.key)}
-              className={`cursor-pointer rounded-md px-3 py-1.5 text-[12.5px] ${
+              className={`ad-interactive ad-press cursor-pointer rounded-md px-3 py-1.5 text-[12.5px] hover:text-fg ${
                 filter === f.key ? "bg-surface-2 font-semibold text-fg" : "font-medium text-fg-2"
               }`}
             >

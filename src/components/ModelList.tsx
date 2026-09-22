@@ -67,7 +67,7 @@ const DraftRow = ({
         <button
           type="button"
           onClick={onCancel}
-          className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[12px] text-fg-2"
+          className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-1.5 text-[12px] text-fg-2 hover:border-fg-3 hover:text-fg"
         >
           Batal
         </button>
@@ -82,7 +82,7 @@ const DraftRow = ({
               outputLimit: draft.outputLimit,
             })
           }
-          className="cursor-pointer rounded-md bg-busy px-3 py-1.5 text-[12px] font-semibold text-bg disabled:cursor-default disabled:opacity-45"
+          className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-3 py-1.5 text-[12px] font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
         >
           Tambah
         </button>
@@ -195,7 +195,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
           type="button"
           disabled={!providerReady || fetchModels.isPending}
           onClick={() => fetchModels.mutate()}
-          className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
+          className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
         >
           {fetchModels.isPending ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
           Ambil dari /v1/models
@@ -203,7 +203,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
+          className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
         >
           <Plus size={14} />
           Model manual
@@ -235,14 +235,14 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
             <button
               type="button"
               onClick={() => (settingLimits ? setSettingLimits(false) : openLimitForm())}
-              className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg"
+              className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg"
             >
               Set limit
             </button>
             <button
               type="button"
               onClick={() => bulk(applyDefaultLimits(models, selected))}
-              className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg"
+              className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg"
             >
               Isi default
             </button>
@@ -251,7 +251,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
               onClick={() => {
                 if (confirm(`Hapus ${selected.length} model dari daftar?`)) bulk(removeSelected(models, selected));
               }}
-              className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-err"
+              className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:border-err/60 hover:text-err"
             >
               Hapus
             </button>
@@ -261,7 +261,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
                 setSelected([]);
                 setSettingLimits(false);
               }}
-              className="cursor-pointer rounded-md px-2.5 py-1 text-[11.5px] text-fg-3 hover:text-fg"
+              className="ad-interactive ad-press cursor-pointer rounded-md px-2.5 py-1 text-[11.5px] text-fg-3 hover:text-fg"
             >
               Batal pilih
             </button>
@@ -291,7 +291,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
               <button
                 type="button"
                 onClick={applyLimitForm}
-                className="cursor-pointer rounded-md bg-busy px-3 py-1.5 text-[12px] font-semibold text-bg"
+                className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-3 py-1.5 text-[12px] font-semibold text-bg hover:opacity-90"
               >
                 Terapkan
               </button>
@@ -394,14 +394,14 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
                           type="button"
                           disabled={!providerReady || busy}
                           onClick={() => test.mutate(model.id)}
-                          className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
+                          className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
                         >
                           Tes
                         </button>
                         <button
                           type="button"
                           onClick={() => onChange(models.filter((m) => m.id !== model.id))}
-                          className="cursor-pointer rounded-md p-1.5 text-fg-3 hover:text-err"
+                          className="ad-interactive ad-press cursor-pointer rounded-md p-1.5 text-fg-3 hover:bg-err/10 hover:text-err"
                         >
                           <Trash2 size={14} />
                         </button>

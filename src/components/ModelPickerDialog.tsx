@@ -43,7 +43,7 @@ export const ModelPickerDialog = ({ fetched, existing, onCancel, onAdd }: ModelP
           <button
             type="button"
             onClick={onCancel}
-            className="cursor-pointer rounded-md p-1 text-fg-3 hover:text-fg"
+            className="ad-interactive ad-press cursor-pointer rounded-md p-1 text-fg-3 hover:bg-surface-2 hover:text-fg"
           >
             <X size={16} />
           </button>
@@ -64,7 +64,7 @@ export const ModelPickerDialog = ({ fetched, existing, onCancel, onAdd }: ModelP
             <div className="py-10 text-center text-sm text-fg-3">Tidak ada model yang cocok.</div>
           ) : (
             <div className="flex flex-col">
-              <label className="flex cursor-pointer items-center gap-2.5 border-b border-border pb-2.5 text-[11.5px] text-fg-3">
+              <label className="ad-interactive flex cursor-pointer items-center gap-2.5 border-b border-border pb-2.5 text-[11.5px] text-fg-3 hover:bg-surface-2">
                 <input
                   type="checkbox"
                   checked={allVisibleSelected}
@@ -80,7 +80,7 @@ export const ModelPickerDialog = ({ fetched, existing, onCancel, onAdd }: ModelP
                 return (
                   <label
                     key={id}
-                    className={`flex items-center gap-2.5 border-b border-border/60 py-2.5 last:border-0 ${
+                    className={`ad-interactive flex items-center gap-2.5 border-b border-border/60 py-2.5 last:border-0 hover:bg-surface-2 ${
                       already ? "cursor-default" : "cursor-pointer"
                     }`}
                   >
@@ -109,7 +109,7 @@ export const ModelPickerDialog = ({ fetched, existing, onCancel, onAdd }: ModelP
               <button
                 type="button"
                 onClick={onCancel}
-                className="cursor-pointer rounded-md border border-border px-3 py-1.75 text-xs text-fg-2"
+                className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-1.75 text-xs text-fg-2 hover:border-fg-3 hover:text-fg"
               >
                 Batal
               </button>
@@ -117,7 +117,7 @@ export const ModelPickerDialog = ({ fetched, existing, onCancel, onAdd }: ModelP
                 type="button"
                 disabled={selected.length === 0}
                 onClick={() => onAdd(selected)}
-                className="cursor-pointer rounded-md bg-busy px-3 py-1.75 text-xs font-semibold text-bg disabled:cursor-default disabled:opacity-45"
+                className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-3 py-1.75 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
               >
                 Tambah {selected.length} model
               </button>
