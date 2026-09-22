@@ -120,6 +120,62 @@ export interface TermExitEvent {
   code: number | null;
 }
 
+export interface OcModel {
+  id: string;
+  name: string | null;
+  contextLimit: number | null;
+  outputLimit: number | null;
+}
+
+export type OcAuth = "config" | "cli" | "none";
+export type HeaderStyle = "bearer" | "custom";
+
+export interface OcProvider {
+  id: string;
+  name: string;
+  npm: string;
+  baseUrl: string;
+  auth: OcAuth;
+  headerStyle: HeaderStyle;
+  customHeaderName: string | null;
+  enabled: boolean;
+  keyMasked: string | null;
+  keyInline: boolean;
+  source: "global" | "project";
+  models: OcModel[];
+}
+
+export interface ModelsOverview {
+  claude: { models: string[]; recentlyUsed: string[] };
+  opencode: OcProvider[];
+  codex: { models: string[]; note: string };
+}
+
+export interface OcProviderInput {
+  id: string;
+  name: string;
+  npm: string;
+  baseUrl: string;
+  headerStyle: HeaderStyle;
+  customHeaderName: string | null;
+  enabled: boolean;
+  models: OcModel[];
+}
+
+export interface ModelTestResult {
+  ok: boolean;
+  status: number | null;
+  latencyMs: number;
+  reply: string | null;
+  error: string | null;
+  usedHeader: HeaderStyle;
+}
+
+export interface ConfigBackup {
+  path: string;
+  atMs: number;
+}
+
 export const indexStatus = () => invoke<IndexStatus>("index_status");
 export const reindex = () => invoke<IndexStatus>("reindex");
 export const historyDaily = (days: number) => invoke<DailyRow[]>("history_daily", { days });
@@ -141,3 +197,19 @@ export const termResize = (id: string, cols: number, rows: number) =>
   invoke<null>("term_resize", { id, cols, rows });
 export const termKill = (id: string) => invoke<null>("term_kill", { id });
 export const termScrollback = (id: string) => invoke<string>("term_scrollback", { id });
+
+export const modelsOverview = () => invoke<ModelsOverview>("models_overview");
+export const providerSave = (provider: OcProviderInput) =>
+  invoke<OcProvider>("provider_save", { provider });
+export const providerDelete = (id: string) => invoke<null>("provider_delete", { id });
+export const secretSet = (providerId: string, key: string) =>
+  invoke<string>("secret_set", { providerId, key });
+export const secretClear = (providerId: string) => invoke<null>("secret_clear", { providerId });
+export const secretReveal = (providerId: string) => invoke<string>("secret_reveal", { providerId });
+export const secretMigrateInline = (providerId: string) =>
+  invoke<string>("secret_migrate_inline", { providerId });
+export const modelsFetch = (providerId: string) => invoke<string[]>("models_fetch", { providerId });
+export const modelTest = (providerId: string, model: string) =>
+  invoke<ModelTestResult>("model_test", { providerId, model });
+export const configBackups = () => invoke<ConfigBackup[]>("config_backups");
+export const configRestore = (path: string) => invoke<null>("config_restore", { path });
