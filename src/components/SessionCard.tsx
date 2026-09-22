@@ -139,7 +139,7 @@ export const SessionCard = ({
   return (
     <div
       ref={rootRef}
-      className={`flex h-full min-w-0 flex-col gap-3 rounded-[10px] border p-4 ${
+      className={`ad-rise flex h-full min-w-0 flex-col gap-3 rounded-[10px] border p-4 ${
         stalled
           ? "border-err/40 bg-err/6"
           : waiting || slow
@@ -223,8 +223,8 @@ export const SessionCard = ({
         <button
           type="button"
           onClick={onOpenSiblings}
-          className={`flex cursor-pointer items-center gap-1.5 border-t border-border pt-1.5 text-left text-[11.5px] ${
-            siblingWaiting > 0 ? "text-waiting" : "text-fg-3 hover:text-fg-2"
+          className={`ad-interactive ad-press flex cursor-pointer items-center gap-1.5 border-t border-border pt-1.5 text-left text-[11.5px] ${
+            siblingWaiting > 0 ? "text-waiting" : "ad-interactive text-fg-3 hover:text-fg-2"
           }`}
         >
           <Icon icon="lucide:folder-git-2" width={12} height={12} />
@@ -241,7 +241,7 @@ export const SessionCard = ({
             type="button"
             onClick={() => setSubagentsOpen((v) => !v)}
             aria-expanded={subagentsOpen}
-            className="flex cursor-pointer items-center gap-1.5 text-left text-[11.5px] text-fg-3 hover:text-fg-2"
+            className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 text-left text-[11.5px] text-fg-3 hover:text-fg-2"
           >
             <Icon
               icon="lucide:chevron-right"
@@ -284,7 +284,7 @@ export const SessionCard = ({
             <button
               type="button"
               onClick={answerWaiting}
-              className="shrink-0 cursor-pointer rounded-md bg-waiting px-3 py-1.25 text-[12px] font-semibold text-bg"
+              className="ad-interactive ad-press shrink-0 cursor-pointer rounded-md bg-waiting px-3 py-1.25 text-[12px] font-semibold text-bg hover:opacity-90"
             >
               Jawab
             </button>
@@ -293,8 +293,8 @@ export const SessionCard = ({
               type="button"
               disabled={busy}
               onClick={startNew}
-              className={`shrink-0 rounded-md border px-3 py-1.25 text-[12px] font-semibold ${
-                confirmStart ? "border-waiting text-waiting" : "border-border"
+              className={`ad-interactive ad-press shrink-0 rounded-md border px-3 py-1.25 text-[12px] font-semibold ${
+                confirmStart ? "border-waiting text-waiting" : "ad-interactive border-border hover:border-fg-3 hover:text-fg"
               } ${busy ? "cursor-default text-fg-3" : "cursor-pointer"} ${
                 !confirmStart && !busy ? "text-fg-2" : ""
               }`}
@@ -308,7 +308,7 @@ export const SessionCard = ({
         <span className="flex items-center gap-2 text-[11.5px] text-fg-3">
           <span className="min-w-0 flex-1">{note}</span>
           {confirmStart && (
-            <button type="button" onClick={cancelStart} className="shrink-0 cursor-pointer underline">
+            <button type="button" onClick={cancelStart} className="ad-interactive ad-press shrink-0 cursor-pointer underline hover:text-fg">
               Batal
             </button>
           )}

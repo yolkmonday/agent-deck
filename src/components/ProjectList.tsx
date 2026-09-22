@@ -70,7 +70,7 @@ export const ProjectList = ({
               type="button"
               disabled={i === 0 || busy}
               onClick={() => onMove(p, -1)}
-              className="cursor-pointer rounded-md border border-border px-2 py-1 text-[11.5px] text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-35"
+              className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2 py-1 text-[11.5px] text-fg-2 hover:border-fg-3 hover:text-fg disabled:cursor-default disabled:opacity-35"
             >
               Naik
             </button>
@@ -78,7 +78,7 @@ export const ProjectList = ({
               type="button"
               disabled={i === projects.length - 1 || busy}
               onClick={() => onMove(p, 1)}
-              className="cursor-pointer rounded-md border border-border px-2 py-1 text-[11.5px] text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-35"
+              className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2 py-1 text-[11.5px] text-fg-2 hover:border-fg-3 hover:text-fg disabled:cursor-default disabled:opacity-35"
             >
               Turun
             </button>
@@ -86,7 +86,7 @@ export const ProjectList = ({
               type="button"
               onClick={() => onEdit(p)}
               aria-label="Ubah"
-              className="cursor-pointer rounded-md p-1.5 text-fg-3 hover:text-fg"
+              className="ad-interactive ad-press cursor-pointer rounded-md p-1.5 text-fg-3 hover:bg-surface-2 hover:text-fg"
             >
               <Pencil size={14} />
             </button>
@@ -99,14 +99,14 @@ export const ProjectList = ({
                     onDelete(p.id);
                     setPendingDelete(null);
                   }}
-                  className="cursor-pointer rounded-md bg-err px-2.5 py-1 text-[11.5px] font-semibold text-bg disabled:cursor-default disabled:opacity-45"
+                  className="ad-interactive ad-press cursor-pointer rounded-md bg-err px-2.5 py-1 text-[11.5px] font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
                 >
                   Yakin?
                 </button>
                 <button
                   type="button"
                   onClick={() => setPendingDelete(null)}
-                  className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2"
+                  className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:border-fg-3 hover:text-fg"
                 >
                   Batal
                 </button>
@@ -116,7 +116,7 @@ export const ProjectList = ({
                 type="button"
                 onClick={() => setPendingDelete(p.id)}
                 aria-label="Hapus"
-                className="cursor-pointer rounded-md p-1.5 text-fg-3 hover:text-err"
+                className="ad-interactive ad-press cursor-pointer rounded-md p-1.5 text-fg-3 hover:bg-err/10 hover:text-err"
               >
                 <Trash2 size={14} />
               </button>

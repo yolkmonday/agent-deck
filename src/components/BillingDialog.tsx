@@ -96,9 +96,9 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
   const allValid = rows !== null && rows.every(valid);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 px-6" onClick={onClose}>
+    <div className="ad-fade fixed inset-0 z-50 flex items-center justify-center bg-bg/70 px-6" onClick={onClose}>
       <div
-        className="flex max-h-[85vh] w-full max-w-3xl flex-col gap-4 overflow-hidden rounded-xl border border-border bg-surface p-6"
+        className="ad-rise flex max-h-[85vh] w-full max-w-3xl flex-col gap-4 overflow-hidden rounded-xl border border-border bg-surface p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">
@@ -112,7 +112,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
           <button
             type="button"
             onClick={onClose}
-            className="cursor-pointer rounded-md px-2 py-1 text-xs text-fg-3 hover:text-fg"
+            className="ad-interactive ad-press cursor-pointer rounded-md px-2 py-1 text-xs text-fg-3 hover:text-fg"
           >
             Tutup
           </button>
@@ -162,7 +162,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
                   <button
                     type="button"
                     onClick={() => setRows((prev) => prev?.filter((_, idx) => idx !== i) ?? prev)}
-                    className="cursor-pointer rounded-md px-2 py-1.5 text-xs text-fg-3 hover:text-err"
+                    className="ad-interactive ad-press cursor-pointer rounded-md px-2 py-1.5 text-xs text-fg-3 hover:bg-err/10 hover:text-err"
                   >
                     Hapus
                   </button>
@@ -260,7 +260,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
             <button
               type="button"
               onClick={() => setRows((prev) => [...(prev ?? []), blank()])}
-              className="cursor-pointer rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
+              className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:border-fg-3 hover:text-fg"
             >
               Tambah akun
             </button>
@@ -268,7 +268,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
               type="button"
               disabled={!allValid || save.isPending}
               onClick={() => rows && save.mutate(rows.map(toAccount))}
-              className="cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg disabled:cursor-default disabled:opacity-45"
+              className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
             >
               {save.isPending ? "Menyimpan…" : "Simpan"}
             </button>

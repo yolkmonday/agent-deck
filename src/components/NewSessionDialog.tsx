@@ -129,9 +129,9 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
             <button
               type="button"
               onClick={pickFree}
-              className={`flex items-center gap-2.5 rounded-md border px-3 py-2.5 text-left text-[13px] ${
+              className={`ad-interactive ad-press flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-left text-[13px] hover:bg-surface-2 ${
                 freeSelected ? "border-busy/50 bg-surface-2 font-semibold" : "border-border"
-              } cursor-pointer`}
+              }`}
             >
               <span className="size-2 rounded-full bg-idle" />
               <span className="flex-1">Folder bebas</span>
@@ -149,7 +149,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
                     onClose();
                     nav.project();
                   }}
-                  className="cursor-pointer self-start rounded-md border border-border px-2.5 py-1 text-[11.5px] font-medium text-fg-2 hover:text-fg"
+                  className="ad-interactive ad-press cursor-pointer self-start rounded-md border border-border px-2.5 py-1 text-[11.5px] font-medium text-fg-2 hover:text-fg"
                 >
                   Buka halaman Project
                 </button>
@@ -163,7 +163,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
                     type="button"
                     disabled={!p.exists}
                     onClick={() => pickProject(p)}
-                    className={`flex items-center gap-2.5 rounded-md border px-3 py-2.5 text-left text-[13px] ${
+                    className={`ad-interactive ad-press flex items-center gap-2.5 rounded-md border px-3 py-2.5 text-left text-[13px] hover:bg-surface-2 ${
                       active ? "border-busy/50 bg-surface-2 font-semibold" : "border-border"
                     } ${p.exists ? "cursor-pointer" : "cursor-default opacity-45"}`}
                   >
@@ -193,7 +193,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
                 type="button"
                 disabled={!p.available}
                 onClick={() => setProfileId(p.id)}
-                className={`flex items-center gap-2.5 rounded-md border px-3 py-2.5 text-left text-[13px] ${
+                className={`ad-interactive ad-press flex items-center gap-2.5 rounded-md border px-3 py-2.5 text-left text-[13px] hover:bg-surface-2 ${
                   p.id === profileId ? "border-busy/50 bg-surface-2 font-semibold" : "border-border"
                 } ${p.available ? "cursor-pointer" : "cursor-default opacity-45"}`}
               >
@@ -230,7 +230,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
               type="button"
               disabled={picking}
               onClick={() => void browse()}
-              className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-[11.5px] font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
+              className="ad-interactive ad-press flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-[11.5px] font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
             >
               <Icon icon="lucide:folder-open" width={13} height={13} />
               {picking ? "Membuka…" : "Pilih folder…"}
@@ -267,7 +267,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
           <button
             type="button"
             onClick={onClose}
-            className="cursor-pointer rounded-md border border-border px-3.5 py-2 text-[13px] text-fg-2"
+            className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3.5 py-2 text-[13px] text-fg-2 hover:border-fg-3 hover:text-fg"
           >
             Batal
           </button>
@@ -275,8 +275,8 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
             type="button"
             disabled={!canStart}
             onClick={() => void submit()}
-            className={`rounded-md px-3.5 py-2 text-[13px] font-semibold ${
-              canStart ? "cursor-pointer bg-busy text-bg" : "cursor-default bg-surface-2 text-fg-3"
+            className={`ad-interactive ad-press rounded-md px-3.5 py-2 text-[13px] font-semibold ${
+              canStart ? "ad-interactive cursor-pointer bg-busy text-bg hover:opacity-90" : "cursor-default bg-surface-2 text-fg-3"
             }`}
           >
             {busy ? "Menjalankan…" : "Jalankan"}

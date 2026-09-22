@@ -72,7 +72,7 @@ const Row = ({ s, onOpenTerminal }: { s: Session; onOpenTerminal: (id?: string) 
     <button
       type="button"
       onClick={() => onOpenTerminal()}
-      className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] font-semibold text-fg-2"
+      className="ad-interactive ad-press shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] font-semibold text-fg-2 hover:border-fg-3 hover:text-fg"
     >
       Terminal
     </button>
@@ -100,14 +100,14 @@ export const GroupModal = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+      className="ad-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
       role="dialog"
       aria-modal="true"
       aria-label={`Sesi lain di ${label}`}
       onClick={onClose}
     >
       <div
-        className="flex max-h-[80vh] w-full max-w-[760px] flex-col rounded-xl border border-border bg-surface"
+        className="ad-rise flex max-h-[80vh] w-full max-w-[760px] flex-col rounded-xl border border-border bg-surface"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
@@ -120,7 +120,7 @@ export const GroupModal = ({
             type="button"
             onClick={onClose}
             aria-label="Tutup"
-            className="cursor-pointer text-fg-3 hover:text-fg"
+            className="ad-interactive ad-press cursor-pointer text-fg-3 hover:text-fg"
           >
             <Icon icon="lucide:x" width={16} height={16} />
           </button>

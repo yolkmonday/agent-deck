@@ -168,25 +168,27 @@ const App = () => {
         />
         <div className="flex min-h-0 flex-1">
           <Sidebar page={page} onSelect={setPage} onJumpWaiting={firstJump} waitingCount={waiting.length} />
-          {page === "live" && (
-            <LivePage
-              onOpenTerminal={goToTerminal}
-              highlightSessionId={highlightSessionId}
-              onHighlightDone={() => setHighlightSessionId(null)}
-            />
-          )}
-          {page === "activity" && <ActivityPage />}
-          {page === "token" && <TokenPage />}
-          {page === "timeline" && <TimelinePage />}
-          {page === "savings" && <SavingsPage />}
-          {page === "terminal" && <TerminalPage initialSessionId={terminalTarget} />}
-          {page === "provider" &&
-            (providerTarget === null ? (
-              <ProviderOverviewPage onNew={() => nav.provider("__new__")} />
-            ) : (
-              <ProviderEditPage providerId={providerTarget === "__new__" ? null : providerTarget} />
-            ))}
-          {page === "project" && <ProjectPage />}
+          <div key={page} className="ad-fade flex min-h-0 min-w-0 flex-1 flex-col">
+            {page === "live" && (
+              <LivePage
+                onOpenTerminal={goToTerminal}
+                highlightSessionId={highlightSessionId}
+                onHighlightDone={() => setHighlightSessionId(null)}
+              />
+            )}
+            {page === "activity" && <ActivityPage />}
+            {page === "token" && <TokenPage />}
+            {page === "timeline" && <TimelinePage />}
+            {page === "savings" && <SavingsPage />}
+            {page === "terminal" && <TerminalPage initialSessionId={terminalTarget} />}
+            {page === "provider" &&
+              (providerTarget === null ? (
+                <ProviderOverviewPage onNew={() => nav.provider("__new__")} />
+              ) : (
+                <ProviderEditPage providerId={providerTarget === "__new__" ? null : providerTarget} />
+              ))}
+            {page === "project" && <ProjectPage />}
+          </div>
         </div>
       </div>
     </NavProvider>
