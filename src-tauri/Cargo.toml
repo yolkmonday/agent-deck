@@ -24,6 +24,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 collector = { path = "crates/collector" }
 dirs = "5"
+portable-pty = "0.9"
+anyhow = "1"
 
 [dev-dependencies]
 tempfile = "3"
