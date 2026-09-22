@@ -63,6 +63,35 @@ export interface TimelineLane {
   spans: TimelineSpan[];
 }
 
+export interface SavingsSource {
+  available: boolean;
+  savedTokens: number;
+  totalTokens: number;
+  savingsPct: number;
+  entries: number;
+}
+
+export interface SavingsDay {
+  date: string;
+  rtkSaved: number;
+  leanCtxSaved: number;
+}
+
+export interface SavingsCommand {
+  command: string;
+  savedTokens: number;
+  savingsPct: number;
+  runs: number;
+}
+
+export interface SavingsSummary {
+  rtk: SavingsSource;
+  leanCtx: SavingsSource;
+  daily: SavingsDay[];
+  topCommands: SavingsCommand[];
+  warnings: string[];
+}
+
 export const indexStatus = () => invoke<IndexStatus>("index_status");
 export const reindex = () => invoke<IndexStatus>("reindex");
 export const historyDaily = (days: number) => invoke<DailyRow[]>("history_daily", { days });
@@ -73,3 +102,4 @@ export const pricingGet = () => invoke<PriceEntry[]>("pricing_get");
 export const pricingSet = (entries: PriceEntry[]) => invoke<PriceEntry[]>("pricing_set", { entries });
 export const timelineSpans = (fromMs: number, toMs: number) =>
   invoke<TimelineLane[]>("timeline_spans", { fromMs, toMs });
+export const savingsSummary = (days: number) => invoke<SavingsSummary>("savings_summary", { days });
