@@ -236,6 +236,19 @@ export interface ProjectSuggestion {
   messages: number;
 }
 
+export type TailEntry =
+  | { kind: "user"; ms: number; text: string }
+  | { kind: "assistant"; ms: number; text: string; model: string | null }
+  | { kind: "thinking"; ms: number; text: string }
+  | { kind: "tool"; ms: number; name: string; input: string; status: "running" | "ok" | "error" }
+  | { kind: "result"; ms: number; toolName: string; preview: string; isError: boolean };
+
+export interface TranscriptTail {
+  entries: TailEntry[];
+  fileSize: number;
+  found: boolean;
+}
+
 export type AttentionMode = "off" | "notify" | "auto";
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -294,6 +307,9 @@ export const billingSummary = () => invoke<BillingSummary>("billing_summary", {}
 export const timelineSpans = (fromMs: number, toMs: number) =>
   invoke<TimelineLane[]>("timeline_spans", { fromMs, toMs });
 export const savingsSummary = (days: number) => invoke<SavingsSummary>("savings_summary", { days });
+
+export const sessionTail = (sessionId: string, cwd: string, agentId?: string | null) =>
+  invoke<TranscriptTail>("session_tail", { sessionId, cwd, agentId: agentId ?? null });
 
 export const termProfiles = () => invoke<TermProfile[]>("term_profiles");
 export const termStart = (profileId: string, cwd: string) =>
