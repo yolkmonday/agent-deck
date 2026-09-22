@@ -141,7 +141,7 @@ async fn attempt(
 
     let status = res.status().as_u16() as i64;
     let text = res.text().await.unwrap_or_default();
-    let latency_ms = started.elapsed().as_millis() as i64;
+    let latency_ms = elapsed_ms(started);
 
     if !(200..300).contains(&status) {
         let reason = serde_json::from_str::<serde_json::Value>(&text)
@@ -205,11 +205,17 @@ async fn attempt(
     }
 }
 
+/// Elapsed milliseconds since `started`, floored at 1 so a call that really happened is
+/// never reported as instantaneous. Sub-millisecond round trips are common on localhost.
+fn elapsed_ms(started: Instant) -> i64 {
+    (started.elapsed().as_millis() as i64).max(1)
+}
+
 fn failure(error: String, status: Option<i64>, started: Instant, used_header: HeaderStyle) -> ModelTestResult {
     ModelTestResult {
         ok: false,
         status,
-        latency_ms: started.elapsed().as_millis() as i64,
+        latency_ms: elapsed_ms(started),
         reply: None,
         error: Some(error),
         used_header,
