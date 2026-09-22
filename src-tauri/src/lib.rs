@@ -1,3 +1,4 @@
+mod secrets;
 mod terminal;
 
 use collector::indexer::{index_claude, index_codex, index_opencode, IndexReport};
