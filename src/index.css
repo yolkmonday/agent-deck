@@ -1,0 +1,26 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+@theme {
+  --color-bg: #0b0d10;
+  --color-surface: #12151a;
+  --color-surface-2: #1a1e25;
+  --color-border: #252a32;
+  --color-fg: #e7e9ec;
+  --color-fg-2: #9ca4b0;
+  --color-fg-3: #69717d;
+  --color-busy: #4c9aff;
+  --color-waiting: #f5a524;
+  --color-idle: #69717d;
+  --color-ok: #3dd68c;
+  --color-err: #f0616d;
+  --color-claude: #e8825c;
+  --color-opencode: #34d0e0;
+  --color-codex: #a78bfa;
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
+html, body, #root { height: 100%; }
+body { background: var(--color-bg); color: var(--color-fg); font-family: var(--font-sans); }
