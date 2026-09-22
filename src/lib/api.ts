@@ -202,6 +202,29 @@ export interface ProjectSuggestion {
   messages: number;
 }
 
+export type AttentionMode = "off" | "notify" | "auto";
+
+export const DEFAULT_SETTINGS: Settings = { attentionMode: "notify", notifySound: false };
+
+export interface Settings {
+  attentionMode: AttentionMode;
+  notifySound: boolean;
+}
+
+const modes: AttentionMode[] = ["off", "notify", "auto"];
+
+export const normalizeSettings = (s: Partial<Settings> | null | undefined): Settings => ({
+  attentionMode: modes.includes(s?.attentionMode as AttentionMode)
+    ? (s?.attentionMode as AttentionMode)
+    : DEFAULT_SETTINGS.attentionMode,
+  notifySound: typeof s?.notifySound === "boolean" ? s.notifySound : DEFAULT_SETTINGS.notifySound,
+});
+
+export const settingsGet = () => invoke<Settings>("settings_get").then(normalizeSettings);
+export const settingsSet = (settings: Settings) =>
+  invoke<Settings>("settings_set", { settings }).then(normalizeSettings);
+export const windowFocused = () => invoke<boolean>("window_focused");
+
 export const projectsList = () => invoke<Project[]>("projects_list");
 export const projectCreate = (input: ProjectInput) => invoke<Project>("project_create", { input });
 export const projectUpdate = (id: string, input: ProjectInput) =>
