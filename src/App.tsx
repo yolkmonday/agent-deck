@@ -16,6 +16,7 @@ import type { Orphan, Session } from "@/lib/types";
 import { LivePage } from "@/pages/LivePage";
 import { ProviderEditPage } from "@/pages/ProviderEditPage";
 import { ProviderOverviewPage } from "@/pages/ProviderOverviewPage";
+import { ActivityPage } from "@/pages/ActivityPage";
 import { ProjectPage } from "@/pages/ProjectPage";
 import { SavingsPage } from "@/pages/SavingsPage";
 import { TerminalPage } from "@/pages/TerminalPage";
@@ -173,6 +174,7 @@ const App = () => {
               onHighlightDone={() => setHighlightSessionId(null)}
             />
           )}
+          {page === "activity" && <ActivityPage />}
           {page === "token" && <TokenPage />}
           {page === "timeline" && <TimelinePage />}
           {page === "savings" && <SavingsPage />}

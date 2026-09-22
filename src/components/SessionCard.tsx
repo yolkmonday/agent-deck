@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { AgentIcon } from "@/components/BrandIcon";
+import { ClaudeThinking } from "@/components/brainless/claude/claude-thinking";
 import { formatUsd } from "@/lib/cost";
-import { formatDuration, formatTokens, totalTokens } from "@/lib/format";
+import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
 
@@ -47,6 +48,7 @@ export const SessionCard = ({
   const stalled = s.health === "stalled";
   const slow = s.health === "slow";
   const act = activityText(s);
+  const thinking = s.activity?.kind === "thinking" && s.health === "ok";
   const since = s.startedAtMs ? formatDuration(nowMs - s.startedAtMs) : "-";
   const terminalSessions = useTerminal((st) => st.sessions);
   const startSession = useTerminal((st) => st.start);
@@ -122,9 +124,17 @@ export const SessionCard = ({
         </span>
       </div>
       <div className={`flex min-w-0 flex-col gap-1 rounded-md px-3 py-2.5 ${waiting ? "bg-waiting/10" : "bg-bg"}`}>
-        <span className={`truncate text-[11.5px] font-semibold ${waiting ? "text-waiting" : "text-fg-3"}`}>
-          {act.label}
-        </span>
+        {thinking ? (
+          // Single verb, no token estimate, no interrupt hint: see the P14 plan for why.
+          <ClaudeThinking verbs={["Berpikir"]} showTokens={false} hint={null} elapsedMs={s.quietMs} />
+        ) : (
+          <span className={`truncate text-[11.5px] font-semibold ${waiting ? "text-waiting" : "text-fg-3"}`}>
+            {act.label}
+            {s.toolRunningMs !== null && (
+              <span className="font-normal text-fg-3"> · {formatShort(s.toolRunningMs)}</span>
+            )}
+          </span>
+        )}
         {act.detail && (
           <span className="line-clamp-2 break-all font-mono text-xs leading-[1.4]" title={act.detail}>
             {act.detail}

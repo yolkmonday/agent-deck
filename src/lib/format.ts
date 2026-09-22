@@ -16,3 +16,7 @@ export const formatDuration = (ms: number): string => {
 };
 
 export const totalTokens = (t: TokenUsage): number => t.input + t.output + t.cacheRead + t.cacheWrite;
+
+/** Seconds below a minute, then the coarser `formatDuration`. */
+export const formatShort = (ms: number): string =>
+  ms < 60_000 ? `${Math.max(0, Math.floor(ms / 1000))} dtk` : formatDuration(ms);

@@ -1,8 +1,8 @@
-import { Activity, BarChart3, Cpu, Folder, History, PiggyBank, SquareTerminal } from "lucide-react";
+import { Activity, BarChart3, Cpu, Folder, History, PiggyBank, Rss, SquareTerminal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createContext, useContext } from "react";
 
-export type PageKey = "live" | "token" | "timeline" | "savings" | "terminal" | "provider" | "project";
+export type PageKey = "live" | "activity" | "token" | "timeline" | "savings" | "terminal" | "provider" | "project";
 
 export interface NavActions {
   provider: (id: string) => void;
@@ -28,6 +28,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { key: "live", label: "Live", icon: Activity, enabled: true },
+  { key: "activity", label: "Aktivitas", icon: Rss, enabled: true },
   { key: "token", label: "Token & Biaya", icon: BarChart3, enabled: true },
   { key: "timeline", label: "Timeline", icon: History, enabled: true },
   { key: "savings", label: "Hemat Token", icon: PiggyBank, enabled: true },

@@ -1,4 +1,3 @@
-import { ActivityFeed } from "@/components/ActivityFeed";
 import { KpiRow } from "@/components/KpiRow";
 import { SessionCard } from "@/components/SessionCard";
 import { useLive } from "@/store/live";
@@ -13,7 +12,6 @@ export const LivePage = ({
   onHighlightDone?: () => void;
 }) => {
   const snapshot = useLive((s) => s.snapshot);
-  const events = useLive((s) => s.events);
   const sessions = snapshot?.sessions ?? [];
   const nowMs = snapshot?.generatedAtMs ?? Date.now();
   return (
@@ -58,7 +56,6 @@ export const LivePage = ({
             </div>
           )}
         </main>
-        <ActivityFeed events={events} />
       </div>
     </div>
   );

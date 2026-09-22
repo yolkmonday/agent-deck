@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatDuration, formatTokens, totalTokens } from "@/lib/format";
+import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
 
 describe("formatTokens", () => {
   test("millions use jt with comma decimal", () => {
@@ -24,4 +24,15 @@ describe("formatDuration", () => {
 
 test("totalTokens excludes reasoning", () => {
   expect(totalTokens({ input: 1, output: 2, cacheRead: 3, cacheWrite: 4, reasoning: 99 })).toBe(10);
+});
+
+describe("formatShort", () => {
+  test("shows seconds below a minute", () => {
+    expect(formatShort(12_300)).toBe("12 dtk");
+    expect(formatShort(400)).toBe("0 dtk");
+    expect(formatShort(-5_000)).toBe("0 dtk");
+  });
+  test("delegates to formatDuration above a minute", () => {
+    expect(formatShort(90_000)).toBe(formatDuration(90_000));
+  });
 });
