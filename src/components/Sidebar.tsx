@@ -1,16 +1,8 @@
-import { Activity, BarChart3, Cpu, History, PiggyBank, SquareTerminal, Radar } from "lucide-react";
+import { Radar } from "lucide-react";
+import { NAV_ITEMS, type PageKey } from "@/lib/nav";
 import { useLive } from "@/store/live";
 
-const items = [
-  { label: "Live", icon: Activity, active: true },
-  { label: "Token & Biaya", icon: BarChart3 },
-  { label: "Timeline", icon: History },
-  { label: "Hemat Token", icon: PiggyBank },
-  { label: "Terminal", icon: SquareTerminal },
-  { label: "Model & Provider", icon: Cpu },
-];
-
-export const Sidebar = () => {
+export const Sidebar = ({ page, onSelect }: { page: PageKey; onSelect: (page: PageKey) => void }) => {
   const waiting = useLive((s) => s.snapshot?.sessions.filter((x) => x.status === "waiting").length ?? 0);
   return (
     <aside className="flex w-58 shrink-0 flex-col border-r border-border">
@@ -19,22 +11,28 @@ export const Sidebar = () => {
         <span className="text-[15px] font-semibold">Agent Deck</span>
       </div>
       <nav className="flex flex-col gap-0.5 px-3 py-1">
-        {items.map(({ label, icon: Icon, active }) => (
-          <div
-            key={label}
-            className={`flex items-center gap-2.5 rounded-lg px-3 py-2.25 text-[13.5px] ${
-              active ? "bg-surface-2 font-semibold text-fg" : "font-medium text-fg-3"
-            }`}
-          >
-            <Icon size={16} />
-            <span className="flex-1">{label}</span>
-            {active && waiting > 0 && (
-              <span className="rounded-full bg-waiting px-1.75 py-0.5 text-[11px] font-semibold text-bg">
-                {waiting} tunggu
-              </span>
-            )}
-          </div>
-        ))}
+        {NAV_ITEMS.map(({ key, label, icon: Icon, enabled }) => {
+          const active = key === page;
+          return (
+            <button
+              key={key}
+              type="button"
+              disabled={!enabled}
+              onClick={() => onSelect(key)}
+              className={`flex items-center gap-2.5 rounded-lg px-3 py-2.25 text-left text-[13.5px] ${
+                active ? "bg-surface-2 font-semibold text-fg" : "font-medium text-fg-3"
+              } ${enabled ? "cursor-pointer" : "cursor-default opacity-45"}`}
+            >
+              <Icon size={16} />
+              <span className="flex-1">{label}</span>
+              {key === "live" && waiting > 0 && (
+                <span className="rounded-full bg-waiting px-1.75 py-0.5 text-[11px] font-semibold text-bg">
+                  {waiting} tunggu
+                </span>
+              )}
+            </button>
+          );
+        })}
       </nav>
     </aside>
   );
