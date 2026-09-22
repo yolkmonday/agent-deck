@@ -9,15 +9,17 @@ export const RangeFilter = ({
   value,
   onChange,
   options = [1, 7, 14, 30],
+  labels,
 }: {
   value: number;
   onChange: (days: number) => void;
   options?: number[];
+  labels?: Record<number, string>;
 }) => (
   <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.75">
     {options.map((days) => {
       const active = days === value;
-      const label = OPTIONS.find((o) => o.days === days)?.label ?? `${days} hari`;
+      const label = labels?.[days] ?? OPTIONS.find((o) => o.days === days)?.label ?? `${days} hari`;
       return (
         <button
           key={days}
