@@ -96,6 +96,10 @@ impl PriceTable {
             .next()
     }
 
+    pub fn matches(&self, model: &str) -> bool {
+        self.find(model).is_some()
+    }
+
     pub fn cost_usd(&self, model: &str, u: &TokenUsage) -> f64 {
         let Some(e) = self.find(model) else {
             return 0.0;
@@ -160,6 +164,14 @@ mod tests {
     fn unknown_model_costs_zero() {
         let t = PriceTable::defaults();
         assert!(close(t.cost_usd("totally-unknown", &usage(1_000_000, 1_000_000, 0, 0, 0)), 0.0));
+    }
+
+    #[test]
+    fn matches_reports_known_and_unknown() {
+        let t = PriceTable::defaults();
+        assert!(t.matches("claude-sonnet-5"));
+        assert!(t.matches("kn/deepseek-v4-1-flash"));
+        assert!(!t.matches("totally-unknown"));
     }
 
     #[test]

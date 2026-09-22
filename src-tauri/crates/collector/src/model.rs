@@ -66,7 +66,7 @@ pub struct Activity {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub id: String,
@@ -79,21 +79,28 @@ pub struct Session {
     pub status: Status,
     pub activity: Option<Activity>,
     pub tokens: TokenUsage,
+    pub cost_usd: f64,
+    pub priced: bool,
     pub started_at_ms: Option<i64>,
     pub updated_at_ms: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveSnapshot {
     pub sessions: Vec<Session>,
     pub warnings: Vec<String>,
     pub generated_at_ms: i64,
+    pub cost_usd: f64,
+    pub unpriced: usize,
 }
 
 impl LiveSnapshot {
     pub fn same_content(&self, other: &Self) -> bool {
-        self.sessions == other.sessions && self.warnings == other.warnings
+        self.sessions == other.sessions
+            && self.warnings == other.warnings
+            && self.cost_usd == other.cost_usd
+            && self.unpriced == other.unpriced
     }
 }
 
@@ -125,21 +132,24 @@ mod tests {
         let s = Session {
             id: "s1".into(), agent: Agent::Claude, pid: Some(1), project: "p".into(), cwd: "/p".into(),
             model: None, branch: None, status: Status::Waiting, activity: None,
-            tokens: TokenUsage::default(), started_at_ms: None, updated_at_ms: 5,
+            tokens: TokenUsage::default(), cost_usd: 0.0, priced: false,
+            started_at_ms: None, updated_at_ms: 5,
         };
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["agent"], "claude");
         assert_eq!(v["status"], "waiting");
         assert_eq!(v["updatedAtMs"], 5);
         assert_eq!(v["tokens"]["cacheRead"], 0);
+        assert_eq!(v["costUsd"], 0.0);
+        assert_eq!(v["priced"], false);
     }
 
     #[test]
     fn same_content_ignores_timestamp() {
-        let a = LiveSnapshot { sessions: vec![], warnings: vec![], generated_at_ms: 1 };
-        let b = LiveSnapshot { sessions: vec![], warnings: vec![], generated_at_ms: 2 };
+        let a = LiveSnapshot { sessions: vec![], warnings: vec![], generated_at_ms: 1, cost_usd: 0.0, unpriced: 0 };
+        let b = LiveSnapshot { sessions: vec![], warnings: vec![], generated_at_ms: 2, cost_usd: 0.0, unpriced: 0 };
         assert!(a.same_content(&b));
-        let c = LiveSnapshot { sessions: vec![], warnings: vec!["x".into()], generated_at_ms: 2 };
+        let c = LiveSnapshot { sessions: vec![], warnings: vec!["x".into()], generated_at_ms: 2, cost_usd: 0.0, unpriced: 0 };
         assert!(!a.same_content(&c));
     }
 }

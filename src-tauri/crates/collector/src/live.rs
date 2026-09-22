@@ -2,6 +2,7 @@ use crate::claude::{read_claude_sessions, ClaudeLive};
 use crate::model::{Activity, ActivityKind, Agent, LiveSnapshot, Session, Status};
 use crate::opencode::{read_active, OpencodeLive};
 use crate::process::ProcessTable;
+use crate::pricing::PriceTable;
 use crate::transcript::{find_transcript, TranscriptState};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -69,7 +70,7 @@ fn claude_activity(c: &ClaudeLive, st: &TranscriptState) -> Option<Activity> {
     })
 }
 
-fn opencode_session(o: OpencodeLive, home: &str) -> Session {
+fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable) -> Session {
     let activity = match (&o.running_tool, o.status) {
         (Some(t), _) => Some(Activity { kind: ActivityKind::Tool, label: t.clone(), detail: None }),
         (None, Status::Busy) => Some(Activity {
@@ -78,6 +79,11 @@ fn opencode_session(o: OpencodeLive, home: &str) -> Session {
             detail: None,
         }),
         _ => None,
+    };
+    let priced = o.model.as_deref().is_some_and(|m| prices.matches(m));
+    let cost_usd = match o.model.as_deref() {
+        Some(m) if priced => prices.cost_usd(m, &o.tokens),
+        _ => 0.0,
     };
     Session {
         id: o.id,
@@ -90,6 +96,8 @@ fn opencode_session(o: OpencodeLive, home: &str) -> Session {
         status: o.status,
         activity,
         tokens: o.tokens,
+        cost_usd,
+        priced,
         started_at_ms: None,
         updated_at_ms: o.updated_at_ms,
     }
@@ -100,7 +108,7 @@ impl LiveCollector {
         Self { paths, procs, transcripts: HashMap::new() }
     }
 
-    fn claude_session(&mut self, c: ClaudeLive) -> Session {
+    fn claude_session(&mut self, c: ClaudeLive, prices: &PriceTable) -> Session {
         let projects = self.paths.claude_projects.clone();
         let (path, state) = self
             .transcripts
@@ -114,6 +122,11 @@ impl LiveCollector {
         if !path.as_os_str().is_empty() {
             let _ = state.advance(path);
         }
+        let priced = state.model.as_deref().is_some_and(|m| prices.matches(m));
+        let cost_usd = match state.model.as_deref() {
+            Some(m) if priced => prices.cost_usd(m, &state.tokens),
+            _ => 0.0,
+        };
         Session {
             id: c.session_id.clone(),
             agent: Agent::Claude,
@@ -125,12 +138,14 @@ impl LiveCollector {
             status: c.status,
             activity: claude_activity(&c, state),
             tokens: state.tokens.clone(),
+            cost_usd,
+            priced,
             started_at_ms: c.started_at_ms,
             updated_at_ms: c.updated_at_ms,
         }
     }
 
-    pub fn snapshot(&mut self, now_ms: i64) -> LiveSnapshot {
+    pub fn snapshot(&mut self, now_ms: i64, prices: &PriceTable) -> LiveSnapshot {
         let mut sessions = Vec::new();
         let mut warnings = Vec::new();
 
@@ -139,11 +154,12 @@ impl LiveCollector {
             claude.iter().map(|c| (c.session_id.clone(), c.cwd.clone())).collect();
         self.transcripts.retain(|key, _| live_ids.contains(key));
         for c in claude {
-            sessions.push(self.claude_session(c));
+            sessions.push(self.claude_session(c, prices));
         }
 
         match read_active(&self.paths.opencode_db, self.procs.as_ref(), now_ms) {
-            Ok(list) => sessions.extend(list.into_iter().map(|o| opencode_session(o, &self.paths.home))),
+            Ok(list) => sessions
+                .extend(list.into_iter().map(|o| opencode_session(o, &self.paths.home, prices))),
             Err(e) => warnings.push(format!("opencode: {e}")),
         }
 
@@ -152,7 +168,9 @@ impl LiveCollector {
             let wb = b.status == Status::Waiting;
             wb.cmp(&wa).then(b.updated_at_ms.cmp(&a.updated_at_ms))
         });
-        LiveSnapshot { sessions, warnings, generated_at_ms: now_ms }
+        let cost_usd = sessions.iter().map(|s| s.cost_usd).sum();
+        let unpriced = sessions.iter().filter(|s| !s.priced).count();
+        LiveSnapshot { sessions, warnings, generated_at_ms: now_ms, cost_usd, unpriced }
     }
 }
 
@@ -202,7 +220,7 @@ mod tests {
         procs.alive.insert(100);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
 
-        let snap = c.snapshot(2000);
+        let snap = c.snapshot(2000, &PriceTable::defaults());
         assert_eq!(snap.sessions.len(), 1);
         let s = &snap.sessions[0];
         assert_eq!(s.agent, Agent::Claude);
@@ -226,7 +244,7 @@ mod tests {
         let mut procs = FakeProcessTable::default();
         procs.alive.extend([1, 2, 3]);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
-        let ids: Vec<String> = c.snapshot(1000).sessions.into_iter().map(|s| s.id).collect();
+        let ids: Vec<String> = c.snapshot(1000, &PriceTable::defaults()).sessions.into_iter().map(|s| s.id).collect();
         assert_eq!(ids, vec!["b", "c", "a"]);
     }
 
@@ -241,7 +259,7 @@ mod tests {
         let mut procs = FakeProcessTable::default();
         procs.alive.insert(9);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
-        let a = c.snapshot(10).sessions[0].activity.clone().unwrap();
+        let a = c.snapshot(10, &PriceTable::defaults()).sessions[0].activity.clone().unwrap();
         assert_eq!(a.kind, ActivityKind::Waiting);
         assert_eq!(a.detail.as_deref(), Some("input needed"));
     }
@@ -264,7 +282,7 @@ mod tests {
         procs.alive.extend([1, 2]);
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
 
-        let snap = c.snapshot(100);
+        let snap = c.snapshot(100, &PriceTable::defaults());
         let a = snap.sessions.iter().find(|s| s.cwd.ends_with("/a")).unwrap();
         let b = snap.sessions.iter().find(|s| s.cwd.ends_with("/b")).unwrap();
         assert_eq!(a.tokens.output, 11);
@@ -281,9 +299,120 @@ mod tests {
         procs.alive.insert(1);
         procs.procs.push(ProcInfo { pid: 50, command: "/x/opencode run t --dir /d".into() });
         let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
-        let snap = c.snapshot(10);
+        let snap = c.snapshot(10, &PriceTable::defaults());
         assert_eq!(snap.sessions.len(), 1);
         assert_eq!(snap.warnings.len(), 1);
         assert!(snap.warnings[0].starts_with("opencode:"));
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    fn claude_transcript(paths: &Paths, cwd: &str, sid: &str, body: &str) {
+        let dir = paths.claude_projects.join(cwd.replace('/', "-"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{sid}.jsonl")), format!("{body}\n")).unwrap();
+    }
+
+    fn collector(paths: Paths, pids: &[u32]) -> LiveCollector {
+        let mut procs = FakeProcessTable::default();
+        procs.alive.extend(pids.iter().copied());
+        LiveCollector::new(paths, std::sync::Arc::new(procs))
+    }
+
+    #[test]
+    fn session_cost_uses_the_price_table() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/kirimi", "busy", 10);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/kirimi",
+            "s1",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":1000000}}}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let snap = c.snapshot(20, &PriceTable::defaults());
+        let s = &snap.sessions[0];
+        assert!(close(s.cost_usd, 15.0));
+        assert!(s.priced);
+        assert!(close(snap.cost_usd, 15.0));
+        assert_eq!(snap.unpriced, 0);
+    }
+
+    #[test]
+    fn unknown_model_is_zero_and_unpriced() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/kirimi", "busy", 10);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/kirimi",
+            "s1",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"weird-model-9\",\"usage\":{\"output_tokens\":1000000}}}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let snap = c.snapshot(20, &PriceTable::defaults());
+        let s = &snap.sessions[0];
+        assert_eq!(s.cost_usd, 0.0);
+        assert!(!s.priced);
+        assert_eq!(snap.unpriced, 1);
+    }
+
+    #[test]
+    fn session_without_a_model_is_unpriced() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/kirimi", "busy", 10);
+        let mut c = collector(paths, &[1]);
+
+        let snap = c.snapshot(20, &PriceTable::defaults());
+        assert_eq!(snap.sessions[0].model, None);
+        assert!(!snap.sessions[0].priced);
+        assert_eq!(snap.unpriced, 1);
+    }
+
+    #[test]
+    fn snapshot_total_sums_session_costs() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/a", "busy", 10);
+        claude_session(&paths, 2, "s2", "/Users/yolk/Dev/b", "busy", 20);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/a",
+            "s1",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":1000000}}}",
+        );
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/b",
+            "s2",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m2\",\"model\":\"claude-opus-5\",\"usage\":{\"output_tokens\":1000000}}}",
+        );
+        let mut c = collector(paths, &[1, 2]);
+
+        let snap = c.snapshot(30, &PriceTable::defaults());
+        let expected: f64 = snap.sessions.iter().map(|s| s.cost_usd).sum();
+        assert!(close(snap.cost_usd, expected));
+        assert!(close(snap.cost_usd, 90.0));
+        assert_eq!(snap.unpriced, 0);
+    }
+
+    #[test]
+    fn same_content_notices_a_cost_change() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/a", "busy", 10);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/a",
+            "s1",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"claude-sonnet-5\",\"usage\":{\"output_tokens\":1000000}}}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let a = c.snapshot(20, &PriceTable::defaults());
+        let mut b = a.clone();
+        b.cost_usd += 1.0;
+        assert!(!a.same_content(&b));
     }
 }
