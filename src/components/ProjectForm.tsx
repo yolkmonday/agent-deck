@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { Icon } from "@iconify/react";
+import { useEffect, useRef, useState } from "react";
 import type { Project, ProjectInput, TermProfile } from "@/lib/api";
+import { pickFolder } from "@/lib/pick";
 
 export const PALETTE = [
   { value: "#4C9AFF", token: "bg-busy" },
@@ -39,6 +41,11 @@ export const ProjectForm = ({
   onCancel: () => void;
 }) => {
   const [draft, setDraft] = useState<ProjectInput>(blank(nextSortOrder));
+  const [picking, setPicking] = useState(false);
+  const [pickError, setPickError] = useState<string | null>(null);
+  // Remembers the name the last pick wrote, so a second pick may overwrite it but
+  // a name the user typed themselves never gets clobbered.
+  const autoNameRef = useRef<string | null>(null);
 
   useEffect(() => {
     setDraft(
@@ -52,9 +59,38 @@ export const ProjectForm = ({
             sortOrder: editing.sortOrder,
           },
     );
+    setPickError(null);
+    autoNameRef.current = null;
   }, [editing, nextSortOrder]);
 
   const patch = (next: Partial<ProjectInput>) => setDraft((p) => ({ ...p, ...next }));
+
+  const browse = async () => {
+    if (picking) return;
+    setPicking(true);
+    setPickError(null);
+    try {
+      const typed = draft.path.trim();
+      const picked = await pickFolder({
+        title: "Pilih folder project",
+        defaultPath: typed.startsWith("/") ? typed : undefined,
+      });
+      if (picked === null) return;
+      const segments = picked.split("/").filter((s) => s !== "");
+      const last = segments.length === 0 ? "" : segments[segments.length - 1];
+      const adoptsName = draft.name.trim() === "" || draft.name.trim() === autoNameRef.current;
+      setDraft((p) => ({
+        ...p,
+        path: picked,
+        name: adoptsName && last !== "" ? last : p.name,
+      }));
+      if (adoptsName && last !== "") autoNameRef.current = last;
+    } catch (e) {
+      setPickError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPicking(false);
+    }
+  };
 
   const nameInvalid = error === "nama tidak boleh kosong" || error === "nama terlalu panjang";
   const pathInvalid = error === "path harus absolut" || error === "folder tidak ditemukan" || error === "project dengan folder ini sudah ada";
@@ -90,14 +126,28 @@ export const ProjectForm = ({
 
       <label className="flex flex-col gap-1.5">
         <span className="text-xs text-fg-3">Folder</span>
-        <input
-          value={draft.path}
-          onChange={(e) => patch({ path: e.target.value })}
-          placeholder="~/Dev/kirimi"
-          className={`${field} font-mono ${pathInvalid ? "border-err" : ""}`}
-        />
+        <div className="flex items-center gap-2">
+          <input
+            value={draft.path}
+            onChange={(e) => patch({ path: e.target.value })}
+            placeholder="~/Dev/kirimi"
+            className={`${field} min-w-0 flex-1 font-mono ${pathInvalid ? "border-err" : ""}`}
+          />
+          <button
+            type="button"
+            disabled={picking}
+            onClick={() => void browse()}
+            className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-[11.5px] font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
+          >
+            <Icon icon="lucide:folder-open" width={13} height={13} />
+            {picking ? "Membuka…" : "Pilih folder…"}
+          </button>
+        </div>
         <span className="text-[11.5px] text-fg-3">Boleh pakai ~. Folder harus ada saat disimpan.</span>
         {pathInvalid && <span className="text-[11.5px] text-err">{error}</span>}
+        {pickError !== null && (
+          <span className="font-mono text-[11.5px] text-err">Gagal membuka Finder: {pickError}</span>
+        )}
       </label>
 
       <label className="flex flex-col gap-1.5">
