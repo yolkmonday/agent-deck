@@ -1,5 +1,6 @@
 mod config;
 mod probe;
+mod projects;
 mod providers;
 mod secrets;
 mod terminal;
@@ -434,8 +435,7 @@ fn history_daily(days: i64, state: State<'_, Arc<AppState>>) -> Result<Vec<Daily
     Ok(by_key.into_values().collect())
 }
 
-fn agent_rank(a: Agent) -> u8 {
-    match a {
+fn agent_rank(a: Agent) -> u8 {    match a {
         Agent::Claude => 0,
         Agent::Opencode => 1,
         Agent::Codex => 2,
@@ -779,6 +779,138 @@ fn config_restore(path: String, state: State<'_, Arc<AppState>>) -> Result<(), S
     config::restore(&backup, &target).map_err(|e| e.to_string())
 }
 
+/// The six project commands, all of them `Result<T, String>` so a validation
+/// failure travels to the UI as the exact Indonesian string it must display.
+
+#[tauri::command]
+fn projects_list(state: State<'_, Arc<AppState>>) -> Result<Vec<projects::Project>, String> {
+    let rows = state.store.lock().unwrap().projects().map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(projects::to_project).collect())
+}
+
+fn next_sort_order(rows: &[collector::store::ProjectRow], requested: i64) -> i64 {
+    if requested != 0 {
+        return requested;
+    }
+    rows.iter().map(|r| r.sort_order).max().unwrap_or(0) + 1
+}
+
+/// Ids are a timestamp plus a counter, not a dependency: a project is created only
+/// from a user gesture, so collisions within one millisecond are theoretical but
+/// still cheap to rule out.
+fn new_project_id(now: i64, taken: &[collector::store::ProjectRow]) -> String {
+    let mut n = 0u32;
+    loop {
+        let id = format!("p{now:x}-{n:x}");
+        if !taken.iter().any(|r| r.id == id) {
+            return id;
+        }
+        n += 1;
+    }
+}
+
+fn validate_project(
+    input: &projects::ProjectInput,
+    existing: &[collector::store::ProjectRow],
+    editing_id: Option<&str>,
+) -> Result<String, String> {
+    projects::validate(input, &home_dir(), existing, editing_id)
+}
+
+#[tauri::command]
+fn project_create(
+    input: projects::ProjectInput,
+    state: State<'_, Arc<AppState>>,
+) -> Result<projects::Project, String> {
+    let mut store = state.store.lock().unwrap();
+    let existing = store.projects().map_err(|e| e.to_string())?;
+    let path = validate_project(&input, &existing, None)?;
+    let row = collector::store::ProjectRow {
+        id: new_project_id(now_ms(), &existing),
+        name: input.name.trim().to_string(),
+        path,
+        default_profile: input.default_profile.clone(),
+        color: input.color.clone(),
+        sort_order: next_sort_order(&existing, input.sort_order),
+        last_used_ms: None,
+    };
+    store.upsert_project(&row).map_err(|e| e.to_string())?;
+    Ok(projects::to_project(row))
+}
+
+#[tauri::command]
+fn project_update(
+    id: String,
+    input: projects::ProjectInput,
+    state: State<'_, Arc<AppState>>,
+) -> Result<projects::Project, String> {
+    let mut store = state.store.lock().unwrap();
+    let existing = store.projects().map_err(|e| e.to_string())?;
+    let previous = existing
+        .iter()
+        .find(|r| r.id == id)
+        .ok_or_else(|| "project tidak ditemukan".to_string())?
+        .clone();
+    let path = validate_project(&input, &existing, Some(&id))?;
+    let row = collector::store::ProjectRow {
+        id: previous.id,
+        name: input.name.trim().to_string(),
+        path,
+        default_profile: input.default_profile.clone(),
+        color: input.color.clone(),
+        sort_order: input.sort_order,
+        // Editing a project is not using it, so the last-used stamp survives.
+        last_used_ms: previous.last_used_ms,
+    };
+    store.upsert_project(&row).map_err(|e| e.to_string())?;
+    Ok(projects::to_project(row))
+}
+
+#[tauri::command]
+fn project_delete(id: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state
+        .store
+        .lock()
+        .unwrap()
+        .delete_project(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn project_touch(id: String, state: State<'_, Arc<AppState>>) -> Result<projects::Project, String> {
+    let mut store = state.store.lock().unwrap();
+    store
+        .touch_project(&id, now_ms())
+        .map_err(|e| e.to_string())?;
+    let row = store
+        .projects()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|r| r.id == id)
+        .ok_or_else(|| "project tidak ditemukan".to_string())?;
+    Ok(projects::to_project(row))
+}
+
+#[tauri::command]
+fn project_suggestions(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<projects::ProjectSuggestion>, String> {
+    let home = home_dir();
+    let live = state.collector.lock().unwrap().snapshot(now_ms());
+    let (known, saved_paths) = {
+        let store = state.store.lock().map_err(|e| e.to_string())?;
+        let known = store.known_project_dirs().map_err(|e| e.to_string())?;
+        let saved_paths = store
+            .projects()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|r| r.path)
+            .collect();
+        (known, saved_paths)
+    };
+    Ok(projects::suggestions(&live, &known, &saved_paths, &home))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1070,7 +1202,13 @@ pub fn run() {
             models_fetch,
             model_test,
             config_backups,
-            config_restore
+            config_restore,
+            projects_list,
+            project_create,
+            project_update,
+            project_delete,
+            project_touch,
+            project_suggestions
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

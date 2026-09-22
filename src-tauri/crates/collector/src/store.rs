@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS tool_span (
   input INTEGER, output INTEGER, cache_read INTEGER, cache_write INTEGER, reasoning INTEGER
 );
 CREATE INDEX IF NOT EXISTS tool_span_start ON tool_span(start_ms);
+CREATE TABLE IF NOT EXISTS project (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  path TEXT NOT NULL UNIQUE,
+  default_profile TEXT,
+  color TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  last_used_ms INTEGER
+);
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +96,17 @@ pub struct ModelAgg {
     pub agent: Agent,
     pub tokens: TokenUsage,
     pub messages: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectRow {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub default_profile: Option<String>,
+    pub color: Option<String>,
+    pub sort_order: i64,
+    pub last_used_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -413,6 +433,93 @@ impl Store {
             },
         ).map_err(Into::into)
     }
+
+    const PROJECT_COLS: &'static str =
+        "id, name, path, default_profile, color, sort_order, last_used_ms";
+
+    fn project_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
+        Ok(ProjectRow {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            path: r.get(2)?,
+            default_profile: r.get(3)?,
+            color: r.get(4)?,
+            sort_order: r.get(5)?,
+            last_used_ms: r.get(6)?,
+        })
+    }
+
+    pub fn projects(&self) -> Result<Vec<ProjectRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {} FROM project ORDER BY sort_order ASC, name ASC",
+            Self::PROJECT_COLS
+        ))?;
+        let rows = stmt.query_map([], Self::project_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn project_by_path(&self, path: &str) -> Result<Option<ProjectRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {} FROM project WHERE path = ?1",
+            Self::PROJECT_COLS
+        ))?;
+        let mut rows = stmt.query_map([path], Self::project_from_row)?;
+        match rows.next() {
+            Some(r) => Ok(Some(r?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn upsert_project(&mut self, row: &ProjectRow) -> Result<()> {
+        // `path` is UNIQUE and `id` is the key. A plain `INSERT OR REPLACE` would
+        // delete the row that owns a colliding path, so the caller would never see
+        // the collision; an explicit conflict target keeps the unique constraint.
+        self.conn.execute(
+            "INSERT INTO project \
+             (id, name, path, default_profile, color, sort_order, last_used_ms) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+             ON CONFLICT(id) DO UPDATE SET \
+               name = excluded.name, path = excluded.path, \
+               default_profile = excluded.default_profile, color = excluded.color, \
+               sort_order = excluded.sort_order, last_used_ms = excluded.last_used_ms",
+            rusqlite::params![
+                row.id,
+                row.name,
+                row.path,
+                row.default_profile,
+                row.color,
+                row.sort_order,
+                row.last_used_ms,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_project(&mut self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM project WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn touch_project(&mut self, id: &str, now_ms: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE project SET last_used_ms = ?2 WHERE id = ?1",
+            rusqlite::params![id, now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Distinct project NAMES seen in the message index with their message counts,
+    /// busiest first. The index does not store the directory, so a caller that
+    /// needs a path has to resolve the name itself.
+    pub fn known_project_dirs(&self) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT project, COUNT(*) AS n FROM message WHERE project <> '' \
+             GROUP BY project ORDER BY n DESC, project ASC",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
 }
 
 #[cfg(test)]
@@ -657,8 +764,7 @@ mod tests {
     }
 
     #[test]
-    fn file_progress_round_trips_and_updates() {
-        let tmp = tempfile::tempdir().unwrap();
+    fn file_progress_round_trips_and_updates() {        let tmp = tempfile::tempdir().unwrap();
         let mut s = Store::open(&tmp.path().join("db.sqlite")).unwrap();
         assert!(s.file_progress("/x/a.jsonl").is_none());
         s.set_file_progress(&FileProgress {
@@ -685,5 +791,96 @@ mod tests {
         assert_eq!(p.offset, 150);
         assert_eq!(p.size, 200);
         assert_eq!(s.counts().unwrap().0, 1);
+    }
+
+    fn project(id: &str, name: &str, path: &str, sort_order: i64) -> ProjectRow {
+        ProjectRow {
+            id: id.into(),
+            name: name.into(),
+            path: path.into(),
+            default_profile: None,
+            color: None,
+            sort_order,
+            last_used_ms: None,
+        }
+    }
+
+    fn open_store() -> (tempfile::TempDir, Store) {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        (tmp, store)
+    }
+
+    #[test]
+    fn projects_round_trip_and_order() {
+        let (_tmp, mut s) = open_store();
+        s.upsert_project(&project("c", "zulu", "/x/c", 5)).unwrap();
+        s.upsert_project(&project("a", "beta", "/x/a", 1)).unwrap();
+        s.upsert_project(&project("b", "alpha", "/x/b", 1)).unwrap();
+
+        let rows = s.projects().unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["b", "a", "c"]);
+        assert_eq!(rows[0].name, "alpha");
+        assert_eq!(rows[2].path, "/x/c");
+    }
+
+    #[test]
+    fn upsert_project_updates_in_place() {
+        let (_tmp, mut s) = open_store();
+        s.upsert_project(&project("a", "before", "/x/a", 0)).unwrap();
+        s.upsert_project(&project("a", "after", "/x/a", 0)).unwrap();
+        let rows = s.projects().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "after");
+    }
+
+    #[test]
+    fn project_path_is_unique() {
+        let (_tmp, mut s) = open_store();
+        s.upsert_project(&project("a", "first", "/x/shared", 0)).unwrap();
+        let err = s
+            .upsert_project(&project("b", "second", "/x/shared", 1))
+            .unwrap_err();
+        assert!(!err.to_string().is_empty());
+        assert_eq!(s.projects().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn delete_project_removes_only_that_row() {
+        let (_tmp, mut s) = open_store();
+        s.upsert_project(&project("a", "one", "/x/a", 0)).unwrap();
+        s.upsert_project(&project("b", "two", "/x/b", 1)).unwrap();
+        s.delete_project("a").unwrap();
+        let rows = s.projects().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "b");
+    }
+
+    #[test]
+    fn touch_project_sets_last_used() {
+        let (_tmp, mut s) = open_store();
+        s.upsert_project(&project("a", "one", "/x/a", 0)).unwrap();
+        assert_eq!(s.projects().unwrap()[0].last_used_ms, None);
+        s.touch_project("a", 1_700_000_000_000).unwrap();
+        assert_eq!(s.projects().unwrap()[0].last_used_ms, Some(1_700_000_000_000));
+    }
+
+    #[test]
+    fn known_project_dirs_counts_messages_descending() {
+        let (_tmp, mut s) = open_store();
+        let mut a = row("claude:a", Agent::Claude, "m", 1, usage(1, 0, 0, 0));
+        a.project = "quiet".into();
+        let mut b = row("claude:b", Agent::Claude, "m", 2, usage(1, 0, 0, 0));
+        b.project = "busy".into();
+        let mut c = row("claude:c", Agent::Claude, "m", 3, usage(1, 0, 0, 0));
+        c.project = "busy".into();
+        s.upsert_messages(&[a, b, c]).unwrap();
+
+        let dirs = s.known_project_dirs().unwrap();
+        assert_eq!(
+            dirs,
+            vec![("busy".to_string(), 2), ("quiet".to_string(), 1)]
+        );
     }
 }
