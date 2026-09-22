@@ -176,6 +176,40 @@ export interface ConfigBackup {
   atMs: number;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  path: string;
+  defaultProfile: string | null;
+  color: string | null;
+  sortOrder: number;
+  lastUsedMs: number | null;
+  exists: boolean;
+}
+
+export interface ProjectInput {
+  name: string;
+  path: string;
+  defaultProfile: string | null;
+  color: string | null;
+  sortOrder: number;
+}
+
+export interface ProjectSuggestion {
+  name: string;
+  path: string;
+  source: "live" | "history";
+  messages: number;
+}
+
+export const projectsList = () => invoke<Project[]>("projects_list");
+export const projectCreate = (input: ProjectInput) => invoke<Project>("project_create", { input });
+export const projectUpdate = (id: string, input: ProjectInput) =>
+  invoke<Project>("project_update", { id, input });
+export const projectDelete = (id: string) => invoke<null>("project_delete", { id });
+export const projectTouch = (id: string) => invoke<Project>("project_touch", { id });
+export const projectSuggestions = () => invoke<ProjectSuggestion[]>("project_suggestions");
+
 export const indexStatus = () => invoke<IndexStatus>("index_status");
 export const reindex = () => invoke<IndexStatus>("reindex");
 export const historyDaily = (days: number) => invoke<DailyRow[]>("history_daily", { days });
