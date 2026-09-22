@@ -471,8 +471,15 @@ mod tests {
 
     const MIN: i64 = 60_000;
 
+    /// Emits the ISO 8601 string Claude actually writes, not a bare number.
+    /// The earlier numeric fixture let a real parsing bug pass unnoticed.
+    fn iso(ms: i64) -> String {
+        let t = time::OffsetDateTime::from_unix_timestamp_nanos(ms as i128 * 1_000_000).unwrap();
+        t.format(&time::format_description::well_known::Rfc3339).unwrap()
+    }
+
     fn assistant_at(ms: i64, body: &str) -> String {
-        format!("{{\"type\":\"assistant\",\"timestamp\":{ms},\"message\":{{{body}}}}}")
+        format!("{{\"type\":\"assistant\",\"timestamp\":\"{}\",\"message\":{{{body}}}}}", iso(ms))
     }
 
     #[test]

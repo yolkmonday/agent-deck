@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "@iconify/react";
 import { AgentIcon } from "@/components/BrandIcon";
 import { ClaudeThinking } from "@/components/brainless/claude/claude-thinking";
 import { formatUsd } from "@/lib/cost";
@@ -14,12 +15,17 @@ const statusPill = {
   waiting: "bg-waiting/15 text-waiting",
   idle: "bg-idle/15 text-idle",
 } as const;
-const dot = { busy: "bg-busy", waiting: "bg-waiting", idle: "bg-idle" } as const;
+// Bundled offline in src/lib/icons.ts, so these resolve with no network call.
+const statusIcon = {
+  busy: "lucide:loader-circle",
+  waiting: "lucide:message-circle-question",
+  idle: "lucide:circle-pause",
+} as const;
+const healthIcon = { stalled: "lucide:octagon-alert", slow: "lucide:hourglass" } as const;
 
 // A stalled session borrows the error colours and a slow one the waiting colours,
 // so the board never shows three different greens for three very different states.
 const healthPill = { stalled: "bg-err/15 text-err", slow: "bg-waiting/15 text-waiting" } as const;
-const healthDot = { stalled: "bg-err", slow: "bg-waiting" } as const;
 const healthText = { stalled: "Macet", slow: "Lambat" } as const;
 
 const activityText = (s: Session): { label: string; detail: string | null } => {
@@ -102,12 +108,17 @@ export const SessionCard = ({
         </span>
         {s.health === "ok" ? (
           <span className={`flex items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${statusPill[s.status]}`}>
-            <span className={`size-1.5 rounded-full ${dot[s.status]}`} />
+            <Icon
+              icon={statusIcon[s.status]}
+              width={12}
+              height={12}
+              className={s.status === "busy" ? "animate-spin [animation-duration:2s] motion-reduce:animate-none" : ""}
+            />
             {statusLabel[s.status]}
           </span>
         ) : (
           <span className={`flex items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${healthPill[s.health]}`}>
-            <span className={`size-1.5 rounded-full ${healthDot[s.health]}`} />
+            <Icon icon={healthIcon[s.health]} width={12} height={12} />
             {healthText[s.health]}
           </span>
         )}

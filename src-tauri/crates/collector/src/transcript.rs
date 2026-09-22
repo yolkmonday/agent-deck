@@ -117,7 +117,13 @@ impl TranscriptState {
     }
 
     fn apply(&mut self, v: &Value) {
-        if let Some(ts) = v.get("timestamp").and_then(Value::as_i64) {
+        // Claude writes `timestamp` as an ISO 8601 string, e.g. "2026-09-22T07:38:37.824Z".
+        // Reading it as a number silently yields None on every real record, which leaves
+        // `last_record_ms` empty and makes the caller fall back to a stale session file.
+        if let Some(ts) = v.get("timestamp").and_then(|t| match t {
+            Value::String(s) => crate::indexer::parse_iso_ms(s),
+            other => other.as_i64(),
+        }) {
             self.last_record_ms = Some(ts);
         }
         match v.get("type").and_then(Value::as_str) {
