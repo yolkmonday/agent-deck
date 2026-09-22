@@ -7,6 +7,7 @@ import { ProviderIcon } from "@/components/BrandIcon";
 import type { HeaderStyle, OcModel, OcProviderInput } from "@/lib/api";
 import { configBackups, configRestore, modelsOverview, secretMigrateInline } from "@/lib/api";
 import { providerDelete, providerSave } from "@/lib/api";
+import { incompleteModels } from "@/lib/models";
 import { useNavigate } from "@/lib/nav";
 
 const field =
@@ -211,7 +212,8 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
   }
 
   const idValid = /^[A-Za-z0-9_-]{1,64}$/.test(draft.id);
-  const limitsIncomplete = draft.models.some((m) => m.contextLimit === null || m.outputLimit === null);
+  const incomplete = incompleteModels(draft.models);
+  const limitsIncomplete = incomplete.length > 0;
   const canSave = draft.name.trim() !== "" && idValid && draft.baseUrl.trim() !== "" && !limitsIncomplete;
 
   const patch = (next: Partial<OcProviderInput>) => setDraft((p) => (p === null ? p : { ...p, ...next }));
@@ -406,6 +408,11 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
                   <Trash2 size={14} />
                   Hapus provider
                 </button>
+              )}
+              {limitsIncomplete && (
+                <span className="text-[11.5px] text-waiting">
+                  Tidak bisa simpan: {incomplete.length} model tanpa limit akan rusak di opencode (limit dianggap 0).
+                </span>
               )}
             </div>
 
