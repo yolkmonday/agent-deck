@@ -6,6 +6,7 @@ mod secrets;
 mod terminal;
 
 use collector::indexer::{index_claude, index_codex, index_opencode, IndexReport};
+use collector::health::Thresholds;
 use collector::live::{LiveCollector, Paths};
 use collector::model::{Agent, LiveSnapshot, TokenUsage};
 use collector::pricing::{PriceEntry, PriceTable};
@@ -364,7 +365,7 @@ fn status(state: &AppState) -> Result<IndexStatus, String> {
 #[tauri::command]
 fn live_snapshot(state: State<'_, Arc<AppState>>) -> LiveSnapshot {
     let prices = state.pricing.lock().unwrap().clone();
-    state.collector.lock().unwrap().snapshot(now_ms(), &prices)
+    state.collector.lock().unwrap().snapshot(now_ms(), &prices, &Thresholds::defaults())
 }
 
 #[tauri::command]
@@ -974,7 +975,7 @@ fn project_suggestions(
 ) -> Result<Vec<projects::ProjectSuggestion>, String> {
     let home = home_dir();
     let prices = state.pricing.lock().unwrap().clone();
-    let live = state.collector.lock().unwrap().snapshot(now_ms(), &prices);
+    let live = state.collector.lock().unwrap().snapshot(now_ms(), &prices, &Thresholds::defaults());
     let (known, saved_paths) = {
         let store = state.store.lock().map_err(|e| e.to_string())?;
         let known = store.known_project_dirs().map_err(|e| e.to_string())?;
@@ -1299,7 +1300,7 @@ pub fn run() {
                     // The price lock is held only for the clone, never across the
                     // emit or the sleep below.
                     let prices = state.pricing.lock().unwrap().clone();
-                    let snap = state.collector.lock().unwrap().snapshot(now_ms(), &prices);
+                    let snap = state.collector.lock().unwrap().snapshot(now_ms(), &prices, &Thresholds::defaults());
                     if last.as_ref().is_none_or(|l| !l.same_content(&snap)) {
                         let _ = handle.emit("live://snapshot", &snap);
                         last = Some(snap);

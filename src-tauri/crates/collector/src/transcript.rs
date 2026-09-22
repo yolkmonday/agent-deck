@@ -26,6 +26,12 @@ pub struct TranscriptState {
     pub last_tool: Option<ToolCall>,
     pub pending_tool_id: Option<String>,
     pub turn_ended: bool,
+    /// Timestamp of the most recent record this tailer parsed. `None` until the
+    /// transcript has any record with a timestamp.
+    pub last_record_ms: Option<i64>,
+    /// Timestamp of the record that opened the still-pending tool. Cleared when
+    /// the tool closes, so it is only ever a duration while a tool is open.
+    pub tool_started_ms: Option<i64>,
 }
 
 pub fn encode_cwd(cwd: &str) -> String {
@@ -111,6 +117,9 @@ impl TranscriptState {
     }
 
     fn apply(&mut self, v: &Value) {
+        if let Some(ts) = v.get("timestamp").and_then(Value::as_i64) {
+            self.last_record_ms = Some(ts);
+        }
         match v.get("type").and_then(Value::as_str) {
             Some("assistant") => self.apply_assistant(v),
             Some("user") => self.apply_user(v),
@@ -118,6 +127,7 @@ impl TranscriptState {
                 if v.get("subtype").and_then(Value::as_str) == Some("turn_duration") {
                     self.turn_ended = true;
                     self.pending_tool_id = None;
+                    self.tool_started_ms = None;
                 }
             }
             _ => {}
@@ -149,6 +159,7 @@ impl TranscriptState {
                 continue;
             };
             self.pending_tool_id = Some(id.to_string());
+            self.tool_started_ms = self.last_record_ms;
             self.last_tool = Some(ToolCall {
                 id: id.to_string(),
                 name: name.to_string(),
@@ -170,6 +181,7 @@ impl TranscriptState {
             let id = item.get("tool_use_id").and_then(Value::as_str);
             if id.is_some() && self.pending_tool_id.as_deref() == id {
                 self.pending_tool_id = None;
+                self.tool_started_ms = None;
             }
         }
     }
