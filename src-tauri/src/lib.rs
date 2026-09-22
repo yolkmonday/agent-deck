@@ -1,4 +1,5 @@
 mod config;
+mod providers;
 mod secrets;
 mod terminal;
 

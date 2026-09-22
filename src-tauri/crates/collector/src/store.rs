@@ -339,6 +339,16 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Models this agent has actually been run with, most recently used first.
+    pub fn distinct_models(&self, agent: Agent) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT model FROM message WHERE agent = ?1 AND model <> '' \
+             GROUP BY model ORDER BY MAX(ts_ms) DESC, model ASC",
+        )?;
+        let rows = stmt.query_map([agent_str(agent)], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn by_project(&self, since_ms: i64) -> Result<Vec<ProjectAgg>> {
         let mut stmt = self.conn.prepare(
             "SELECT project, SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), \
@@ -481,6 +491,23 @@ mod tests {
         let t = s.totals(0).unwrap();
         assert_eq!(t.messages, 1);
         assert_eq!(t.tokens.output, 50);
+    }
+
+    #[test]
+    fn distinct_models_are_scoped_to_the_agent_newest_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        s.upsert_messages(&[
+            row("claude:a", Agent::Claude, "claude-old", 1_000, usage(1, 1, 0, 0)),
+            row("claude:b", Agent::Claude, "claude-new", 9_000, usage(1, 1, 0, 0)),
+            row("claude:c", Agent::Claude, "claude-new", 10_000, usage(1, 1, 0, 0)),
+            row("codex:a", Agent::Codex, "gpt-5", 20_000, usage(1, 1, 0, 0)),
+        ])
+        .unwrap();
+
+        assert_eq!(s.distinct_models(Agent::Claude).unwrap(), vec!["claude-new", "claude-old"]);
+        assert_eq!(s.distinct_models(Agent::Codex).unwrap(), vec!["gpt-5"]);
+        assert!(s.distinct_models(Agent::Opencode).unwrap().is_empty());
     }
 
     #[test]
