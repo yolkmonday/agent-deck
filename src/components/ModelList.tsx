@@ -1,10 +1,20 @@
 import { useMutation } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, Plus, Search, Trash2, XCircle, Zap } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ModelPickerDialog } from "@/components/ModelPickerDialog";
 import type { ModelTestResult, OcModel } from "@/lib/api";
 import { modelTest, modelsFetch } from "@/lib/api";
-import { mergeFetched } from "@/lib/models";
+import {
+  applyDefaultLimits,
+  applyLimits,
+  DEFAULT_LIMITS_NOTE,
+  filterModels,
+  incompleteModels,
+  mergeFetched,
+  removeSelected,
+  toggleAll,
+  toggleOne,
+} from "@/lib/models";
 
 interface ModelListProps {
   providerId: string;
@@ -93,7 +103,19 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [fetched, setFetched] = useState<string[] | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [settingLimits, setSettingLimits] = useState(false);
+  const [limitContext, setLimitContext] = useState("");
+  const [limitOutput, setLimitOutput] = useState("");
+  const [limitError, setLimitError] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, ModelTestResult>>({});
+
+  // Selection points at ids from the previous provider once the target changes.
+  useEffect(() => {
+    setSelected([]);
+    setSettingLimits(false);
+    setLimitError(null);
+  }, [providerId]);
 
   const fetchModels = useMutation({
     mutationFn: () => modelsFetch(providerId),
@@ -119,13 +141,43 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
       })),
   });
 
-  const needle = search.trim().toLowerCase();
-  const rows = models.map((m, index) => ({ model: m, index })).filter(({ model }) => {
-    if (needle === "") return true;
-    return model.id.toLowerCase().includes(needle) || (model.name ?? "").toLowerCase().includes(needle);
-  });
+  const rows = filterModels(models, search);
+  const visibleIds = rows.map((m) => m.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
+  const someVisibleSelected = visibleIds.some((id) => selected.includes(id));
 
-  const missingLimit = models.filter((m) => m.contextLimit === null || m.outputLimit === null).length;
+  const missingLimit = incompleteModels(models).length;
+
+  const firstSelected = models.find((m) => selected.includes(m.id)) ?? null;
+
+  const openLimitForm = () => {
+    setLimitError(null);
+    setSettingLimits(true);
+    const peers = models.filter((m) => selected.includes(m.id));
+    const contextAgrees = peers.every((m) => m.contextLimit === firstSelected?.contextLimit);
+    const outputAgrees = peers.every((m) => m.outputLimit === firstSelected?.outputLimit);
+    setLimitContext(contextAgrees && firstSelected?.contextLimit !== null ? String(firstSelected?.contextLimit) : "");
+    setLimitOutput(outputAgrees && firstSelected?.outputLimit !== null ? String(firstSelected?.outputLimit) : "");
+  };
+
+  const applyLimitForm = () => {
+    const context = Number(limitContext);
+    const output = Number(limitOutput);
+    if (limitContext.trim() === "" || limitOutput.trim() === "" || !(context > 0) || !(output > 0)) {
+      setLimitError("Harus angka lebih dari 0");
+      return;
+    }
+    onChange(applyLimits(models, selected, { context, output }));
+    setSettingLimits(false);
+    setLimitError(null);
+    setSelected([]);
+  };
+
+  const bulk = (next: OcModel[]) => {
+    onChange(next);
+    setSelected([]);
+    setSettingLimits(false);
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -172,8 +224,81 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
 
       {missingLimit > 0 && (
         <span className="text-[11.5px] text-waiting">
-          {missingLimit} model belum punya context/output limit. Lengkapi sebelum menyimpan.
+          {missingLimit} model belum punya limit yang sah. Pilih lalu "Isi default" atau "Set limit".
         </span>
+      )}
+
+      {selected.length > 0 && (
+        <div className="flex flex-col gap-2.5 rounded-md border border-busy/40 bg-surface-2 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12px] font-medium text-fg">{selected.length} dipilih</span>
+            <button
+              type="button"
+              onClick={() => (settingLimits ? setSettingLimits(false) : openLimitForm())}
+              className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg"
+            >
+              Set limit
+            </button>
+            <button
+              type="button"
+              onClick={() => bulk(applyDefaultLimits(models, selected))}
+              className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg"
+            >
+              Isi default
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`Hapus ${selected.length} model dari daftar?`)) bulk(removeSelected(models, selected));
+              }}
+              className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-err"
+            >
+              Hapus
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelected([]);
+                setSettingLimits(false);
+              }}
+              className="cursor-pointer rounded-md px-2.5 py-1 text-[11.5px] text-fg-3 hover:text-fg"
+            >
+              Batal pilih
+            </button>
+            <span className="text-[11px] text-fg-3">{DEFAULT_LIMITS_NOTE}</span>
+          </div>
+          <span className="text-[11px] text-fg-3">Model hanya dihapus dari config, bukan dari provider.</span>
+          {settingLimits && (
+            <div className="flex flex-wrap items-end gap-2.5">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-fg-3">Context</span>
+                <input
+                  value={limitContext}
+                  inputMode="numeric"
+                  onChange={(e) => setLimitContext(e.target.value)}
+                  className="w-28 rounded-md border border-border bg-bg px-2 py-1.5 font-mono text-[12px] text-fg outline-none focus:border-busy"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-fg-3">Output</span>
+                <input
+                  value={limitOutput}
+                  inputMode="numeric"
+                  onChange={(e) => setLimitOutput(e.target.value)}
+                  className="w-28 rounded-md border border-border bg-bg px-2 py-1.5 font-mono text-[12px] text-fg outline-none focus:border-busy"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={applyLimitForm}
+                className="cursor-pointer rounded-md bg-busy px-3 py-1.5 text-[12px] font-semibold text-bg"
+              >
+                Terapkan
+              </button>
+              {limitError !== null && <span className="text-[11px] text-err">{limitError}</span>}
+            </div>
+          )}
+        </div>
       )}
 
       {adding && (
@@ -207,6 +332,18 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
           <table className="w-full border-collapse">
             <thead>
               <tr className="border-b border-border">
+                <th className="w-8 pb-2.5 text-left">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    ref={(el) => {
+                      if (el !== null) el.indeterminate = !allVisibleSelected && someVisibleSelected;
+                    }}
+                    disabled={visibleIds.length === 0}
+                    onChange={() => setSelected((p) => toggleAll(p, visibleIds))}
+                    className="size-3.5 cursor-pointer accent-busy disabled:cursor-default disabled:opacity-45"
+                  />
+                </th>
                 <th className="pb-2.5 text-left text-[11px] font-medium text-fg-3">Model</th>
                 <th className="pb-2.5 text-right text-[11px] font-medium text-fg-3">Context</th>
                 <th className="pb-2.5 text-right text-[11px] font-medium text-fg-3">Output</th>
@@ -215,11 +352,20 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ model }) => {
+              {rows.map((model) => {
                 const result = tests[model.id];
                 const busy = test.isPending && test.variables === model.id;
+                const checked = selected.includes(model.id);
                 return (
                   <tr key={model.id} className="border-b border-border/60 last:border-0">
+                    <td className="py-2.5 pr-2">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setSelected((p) => toggleOne(p, model.id))}
+                        className="size-3.5 cursor-pointer accent-busy"
+                      />
+                    </td>
                     <td className="py-2.5 pr-4">
                       <div className="flex flex-col gap-0.5">
                         <span className="font-mono text-[12.5px] text-fg">{model.id}</span>
