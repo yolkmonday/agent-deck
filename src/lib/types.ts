@@ -34,6 +34,10 @@ export interface Session {
   pid: number | null;
   project: string;
   cwd: string;
+  group: string;
+  groupRoot: string;
+  isWorktree: boolean;
+  worktreeName: string | null;
   model: string | null;
   branch: string | null;
   status: Status;

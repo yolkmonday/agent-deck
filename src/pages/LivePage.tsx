@@ -1,5 +1,7 @@
+import { Icon } from "@iconify/react";
 import { KpiRow } from "@/components/KpiRow";
 import { SessionCard } from "@/components/SessionCard";
+import { groupSessions } from "@/lib/grouping";
 import { useLive } from "@/store/live";
 
 export const LivePage = ({
@@ -14,6 +16,7 @@ export const LivePage = ({
   const snapshot = useLive((s) => s.snapshot);
   const sessions = snapshot?.sessions ?? [];
   const nowMs = snapshot?.generatedAtMs ?? Date.now();
+  const groups = groupSessions(sessions);
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
@@ -42,16 +45,31 @@ export const LivePage = ({
               Belum ada agent yang berjalan. Buka claude atau opencode di terminal.
             </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] items-stretch gap-4">
-              {sessions.map((s) => (
-                <SessionCard
-                  key={s.id}
-                  session={s}
-                  nowMs={nowMs}
-                  onOpenTerminal={onOpenTerminal}
-                  highlighted={s.id === highlightSessionId}
-                  onHighlightDone={onHighlightDone}
-                />
+            <div className="flex flex-col gap-6.5">
+              {groups.map((g) => (
+                <div key={g.key} className="flex flex-col gap-3">
+                  {(g.sessions.length > 1 || g.sessions.some((s) => s.isWorktree)) && (
+                    <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-fg-2">
+                      {g.sessions.some((s) => s.isWorktree) && (
+                        <Icon icon="lucide:folder-git-2" width={12} height={12} className="text-fg-3" />
+                      )}
+                      {g.label}
+                      <span className="font-normal text-fg-3">· {g.sessions.length} sesi</span>
+                    </span>
+                  )}
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] items-stretch gap-4">
+                    {g.sessions.map((s) => (
+                      <SessionCard
+                        key={s.id}
+                        session={s}
+                        nowMs={nowMs}
+                        onOpenTerminal={onOpenTerminal}
+                        highlighted={s.id === highlightSessionId}
+                        onHighlightDone={onHighlightDone}
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           )}
