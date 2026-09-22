@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { NavProvider, type PageKey } from "@/lib/nav";
 import { LivePage } from "@/pages/LivePage";
+import { ProviderEditPage } from "@/pages/ProviderEditPage";
 import { ProviderOverviewPage } from "@/pages/ProviderOverviewPage";
 import { SavingsPage } from "@/pages/SavingsPage";
 import { TerminalPage } from "@/pages/TerminalPage";
@@ -13,6 +14,7 @@ import { startTerminalEvents } from "@/store/terminal";
 const App = () => {
   const [page, setPage] = useState<PageKey>("live");
   const [terminalTarget, setTerminalTarget] = useState<string | null>(null);
+  const [providerTarget, setProviderTarget] = useState<string | null>(null);
 
   useEffect(() => {
     const stop = startLive();
@@ -30,7 +32,8 @@ const App = () => {
 
   const nav = useMemo(
     () => ({
-      provider: (_id: string) => {
+      provider: (id: string) => {
+        setProviderTarget(id === "" ? null : id);
         setPage("provider");
       },
     }),
@@ -51,7 +54,12 @@ const App = () => {
         {page === "timeline" && <TimelinePage />}
         {page === "savings" && <SavingsPage />}
         {page === "terminal" && <TerminalPage initialSessionId={terminalTarget} />}
-        {page === "provider" && <ProviderOverviewPage />}
+        {page === "provider" &&
+          (providerTarget === null ? (
+            <ProviderOverviewPage onNew={() => nav.provider("__new__")} />
+          ) : (
+            <ProviderEditPage providerId={providerTarget === "__new__" ? null : providerTarget} />
+          ))}
       </div>
     </NavProvider>
   );

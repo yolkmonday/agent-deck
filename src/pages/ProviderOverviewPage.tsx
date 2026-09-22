@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { ModelChips } from "@/components/ModelChips";
 import { ProviderTable } from "@/components/ProviderTable";
 import { modelsOverview } from "@/lib/api";
 import { useNavigate } from "@/lib/nav";
 
-export const ProviderOverviewPage = () => {
+export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
   const open = useNavigate();
   const query = useQuery({ queryKey: ["models-overview"], queryFn: modelsOverview });
 
@@ -17,6 +18,14 @@ export const ProviderOverviewPage = () => {
             Model tiap agent dan provider opencode yang terpasang. Klik provider untuk mengelola.
           </span>
         </div>
+        <button
+          type="button"
+          onClick={onNew}
+          className="flex cursor-pointer items-center gap-1.5 rounded-md bg-busy px-3.5 py-2 text-[13px] font-semibold text-bg"
+        >
+          <Plus size={15} />
+          Provider baru
+        </button>
       </header>
 
       <main className="flex min-w-0 flex-1 flex-col gap-6.5 overflow-y-auto px-7 pb-7">
