@@ -6,6 +6,7 @@ const base: Session = {
   id: "a", agent: "claude", pid: 1, project: "noor", cwd: "/noor", model: null, branch: null,
   status: "busy", activity: null,
   tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+  costUsd: 0, priced: true,
   startedAtMs: null, updatedAtMs: 0,
 };
 
