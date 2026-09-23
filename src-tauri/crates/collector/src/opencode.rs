@@ -1,5 +1,6 @@
 use crate::model::{Status, TokenUsage};
 use crate::process::ProcessTable;
+use crate::task_text::one_line;
 use anyhow::Result;
 use rusqlite::{Connection, OpenFlags};
 use std::collections::HashMap;
@@ -8,12 +9,14 @@ use std::time::Duration;
 
 const RECENT_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 const BUSY_WINDOW_MS: i64 = 15_000;
+const TASK_MAX: usize = 120;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpencodeLive {
     pub id: String,
     pub directory: String,
-    pub title: Option<String>,
+    /// The session's own title, as opencode writes it in `session.title`.
+    pub task: Option<String>,
     pub model: Option<String>,
     pub tokens: TokenUsage,
     pub status: Status,
@@ -123,6 +126,7 @@ pub fn read_active(db: &Path, procs: &dyn ProcessTable, now_ms: i64) -> Result<V
         if !seen_dirs.insert(directory.clone()) {
             continue;
         }
+        let task = title.map(|t| one_line(&t, TASK_MAX)).filter(|t| !t.is_empty());
         let tool = running_tool(&conn, &id);
         let status = if tool.is_some() || now_ms - updated < BUSY_WINDOW_MS {
             Status::Busy
@@ -133,7 +137,7 @@ pub fn read_active(db: &Path, procs: &dyn ProcessTable, now_ms: i64) -> Result<V
         out.push(OpencodeLive {
             id,
             directory,
-            title,
+            task,
             model: model_label(model),
             tokens,
             status,
@@ -164,9 +168,21 @@ mod tests {
     }
 
     fn insert_session(c: &Connection, id: &str, dir: &str, parent: Option<&str>, updated: i64, archived: Option<i64>) {
+        insert_session_titled(c, id, dir, parent, updated, archived, "title");
+    }
+
+    fn insert_session_titled(
+        c: &Connection,
+        id: &str,
+        dir: &str,
+        parent: Option<&str>,
+        updated: i64,
+        archived: Option<i64>,
+        title: &str,
+    ) {
         c.execute(
-            "INSERT INTO session VALUES (?1,'p',?2,?3,'title','build','{\"id\":\"deepseek-v4-1-flash\",\"providerID\":\"kn\"}',0,10,20,5,100,50,1,?4,?5)",
-            rusqlite::params![id, parent, dir, updated, archived],
+            "INSERT INTO session VALUES (?1,'p',?2,?3,?6,'build','{\"id\":\"deepseek-v4-1-flash\",\"providerID\":\"kn\"}',0,10,20,5,100,50,1,?4,?5)",
+            rusqlite::params![id, parent, dir, updated, archived, title],
         )
         .unwrap();
     }
@@ -221,6 +237,26 @@ mod tests {
         assert_eq!(s.tokens.cache_write, 50);
         assert_eq!(s.running_tool.as_deref(), Some("bash"));
         assert_eq!(s.status, Status::Busy);
+    }
+
+    #[test]
+    fn session_title_becomes_the_task() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = fixture(tmp.path());
+        let c = Connection::open(&db).unwrap();
+        insert_session_titled(&c, "sa", "/a", None, 990_000, None, "  fix\nlogin   page  ");
+        let out = read_active(&db, &procs_with("/a"), 1_000_000).unwrap();
+        assert_eq!(out[0].task.as_deref(), Some("fix login page"));
+    }
+
+    #[test]
+    fn empty_title_is_no_task() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = fixture(tmp.path());
+        let c = Connection::open(&db).unwrap();
+        insert_session_titled(&c, "sa", "/a", None, 990_000, None, "   ");
+        let out = read_active(&db, &procs_with("/a"), 1_000_000).unwrap();
+        assert_eq!(out[0].task, None);
     }
 
     #[test]
