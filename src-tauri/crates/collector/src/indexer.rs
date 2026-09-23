@@ -651,20 +651,6 @@ fn upsert_opencode_spans(
     store.upsert_spans(&spans)
 }
 
-/// Model string for an opencode assistant message, following the same
-/// `providerID`/`modelID` rule as the message pass. `None` when neither field
-/// is usable.
-fn opencode_message_model(msg_data: &Value) -> Option<String> {
-    match (
-        msg_data.get("providerID").and_then(Value::as_str),
-        msg_data.get("modelID").and_then(Value::as_str),
-    ) {
-        (Some(p), Some(m)) => Some(format!("{p}/{m}")),
-        (None, Some(m)) => Some(m.to_string()),
-        _ => None,
-    }
-}
-
 /// Precise per-step generation timing from opencode step-start/step-finish
 /// parts. Uses a 1h lookback (`since - 3_600_000`, clamped at 0) rather than
 /// `since` directly: the message pass advances `since` past a message's
@@ -678,10 +664,61 @@ fn upsert_opencode_perf(
     report: &mut IndexReport,
 ) {
     let lookback = (since - 3_600_000).max(0);
+
+    // Models fetched once per message rather than once per part: a message
+    // often has dozens of parts (tool calls carry large JSON), and every one
+    // used to ship and re-parse the same `m.data` blob.
+    let mut models: std::collections::HashMap<String, Option<String>> = Default::default();
+    let mstmt = conn.prepare(
+        "SELECT id, json_extract(data, '$.providerID'), json_extract(data, '$.modelID') \
+         FROM message WHERE time_created > ?1",
+    );
+    let mut stmt = match mstmt {
+        Ok(stmt) => stmt,
+        Err(_) => {
+            report.errors.push("perf query failed".to_string());
+            return;
+        }
+    };
+    let mrows = stmt.query_map([lookback], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, Option<String>>(2)?,
+        ))
+    });
+    let mrows = match mrows {
+        Ok(rows) => rows,
+        Err(_) => {
+            report.errors.push("perf query failed".to_string());
+            return;
+        }
+    };
+    for (id, provider, model_id) in mrows.flatten() {
+        let model = match (provider, model_id) {
+            (Some(p), Some(m)) => Some(format!("{p}/{m}")),
+            (None, Some(m)) => Some(m),
+            _ => None,
+        };
+        models.insert(id, model);
+    }
+
+    // Only the fields the loop below needs, pulled out with json_extract so a
+    // tool part's large `state.input` JSON never leaves SQLite. The message
+    // join is a subquery so the planner filters `message` by `time_created`
+    // first, then probes `part` by the (already small) id set instead of
+    // scanning every part row.
     let Ok(mut stmt) = conn.prepare(
-        "SELECT p.id, p.message_id, p.session_id, p.time_created, p.data, m.data \
-         FROM part p JOIN message m ON m.id = p.message_id \
-         WHERE m.time_created > ?1 ORDER BY p.message_id, p.time_created, p.id",
+        "SELECT p.id, p.message_id, p.session_id, p.time_created, \
+                json_extract(p.data, '$.type'), \
+                json_extract(p.data, '$.time.start'), \
+                json_extract(p.data, '$.time.end'), \
+                json_extract(p.data, '$.state.time.start'), \
+                json_extract(p.data, '$.tokens.output'), \
+                json_extract(p.data, '$.tokens.reasoning') \
+         FROM part p \
+         WHERE p.message_id IN (SELECT id FROM message WHERE time_created > ?1) \
+         ORDER BY p.message_id, p.time_created, p.id",
     ) else {
         report.errors.push("perf query failed".to_string());
         return;
@@ -692,8 +729,12 @@ fn upsert_opencode_perf(
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
             r.get::<_, i64>(3)?,
-            r.get::<_, String>(4)?,
-            r.get::<_, String>(5)?,
+            r.get::<_, Option<String>>(4)?,
+            r.get::<_, Option<i64>>(5)?,
+            r.get::<_, Option<i64>>(6)?,
+            r.get::<_, Option<i64>>(7)?,
+            r.get::<_, Option<i64>>(8)?,
+            r.get::<_, Option<i64>>(9)?,
         ))
     });
     let Ok(rows) = rows else {
@@ -708,44 +749,32 @@ fn upsert_opencode_perf(
     let mut first: Option<i64> = None;
     let mut gen: i64 = 0;
 
-    for (part_id, message_id, session_id, created, data, msg_data) in rows.flatten() {
+    for (part_id, message_id, session_id, created, ptype, t_start, t_end, state_start, tok_out, tok_reasoning) in
+        rows.flatten()
+    {
         if cur_msg.as_deref() != Some(message_id.as_str()) {
+            model = models.get(&message_id).cloned().flatten();
             cur_msg = Some(message_id);
             step_start = None;
             first = None;
             gen = 0;
-            model = serde_json::from_str::<Value>(&msg_data)
-                .ok()
-                .as_ref()
-                .and_then(opencode_message_model);
         }
-        let Ok(v) = serde_json::from_str::<Value>(&data) else {
-            continue;
-        };
-        match v.get("type").and_then(Value::as_str) {
+        match ptype.as_deref() {
             Some("step-start") => {
                 step_start = Some(created);
                 first = None;
                 gen = 0;
             }
             Some("text") | Some("reasoning") => {
-                let Some(time) = v.get("time") else { continue };
-                let start = time.get("start").and_then(Value::as_i64);
-                let end = time.get("end").and_then(Value::as_i64);
-                if let (Some(start), Some(end)) = (start, end) {
+                if let (Some(start), Some(end)) = (t_start, t_end) {
                     gen += (end - start).max(0);
                 }
-                if let Some(start) = start {
+                if let Some(start) = t_start {
                     first = Some(first.map_or(start, |f| f.min(start)));
                 }
             }
             Some("tool") => {
-                let tool_start = v
-                    .get("state")
-                    .and_then(|s| s.get("time"))
-                    .and_then(|t| t.get("start"))
-                    .and_then(Value::as_i64);
-                if let Some(tool_start) = tool_start {
+                if let Some(tool_start) = state_start {
                     gen += (tool_start - created).max(0);
                 }
                 first = Some(first.map_or(created, |f| f.min(created)));
@@ -753,10 +782,8 @@ fn upsert_opencode_perf(
             Some("step-finish") => {
                 if gen > 0 {
                     if let Some(model) = &model {
-                        let tokens = v.get("tokens").cloned().unwrap_or(Value::Null);
-                        let output = tokens.get("output").and_then(Value::as_i64).unwrap_or(0);
-                        let reasoning =
-                            tokens.get("reasoning").and_then(Value::as_i64).unwrap_or(0);
+                        let output = tok_out.unwrap_or(0);
+                        let reasoning = tok_reasoning.unwrap_or(0);
                         out.push(PerfRow {
                             id: format!("opencode:{part_id}"),
                             agent: Agent::Opencode,
