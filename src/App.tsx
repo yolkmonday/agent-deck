@@ -22,8 +22,9 @@ import { SavingsPage } from "@/pages/SavingsPage";
 import { TerminalPage } from "@/pages/TerminalPage";
 import { TimelinePage } from "@/pages/TimelinePage";
 import { TokenPage } from "@/pages/TokenPage";
+import { focusInstance } from "@/lib/terminal-instances";
 import { useLive, startLive } from "@/store/live";
-import { focusTerminal, startTerminalEvents, useTerminal } from "@/store/terminal";
+import { startTerminalEvents, useTerminal } from "@/store/terminal";
 
 // Stable reference: a fresh [] in the selector makes zustand see a new snapshot
 // on every render and loop forever while the first live snapshot is still null.
@@ -70,7 +71,7 @@ const App = () => {
       setTerminalTarget(target.termId);
       setHighlightSessionId(null);
       setPage("terminal");
-      focusTerminal(target.termId);
+      focusInstance(target.termId);
       return;
     }
     setHighlightSessionId(target.sessionId);
