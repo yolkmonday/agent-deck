@@ -242,6 +242,14 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
         // tool_use id -> (index into `spans`, span) so a later tool_result in the
         // same pass can close it without a second lookup.
         let mut open: std::collections::HashMap<String, usize> = Default::default();
+        // The most recent `user` record's timestamp (prompt or tool_result):
+        // the request anchor for the next assistant response.
+        let mut last_request_ts: Option<i64> = None;
+        // message.id -> (start_ms, end_ms, output_tokens, model) for an
+        // estimated response-speed sample, possibly spanning several
+        // `assistant` records that share the same message.id.
+        let mut perf_open: std::collections::HashMap<String, (i64, i64, i64, String)> =
+            Default::default();
         for v in lines
             .iter()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -262,6 +270,23 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
                     let Some(msg) = v.get("message") else {
                         continue;
                     };
+                    if let (Some(mid), Some(model)) = (
+                        msg.get("id").and_then(Value::as_str),
+                        msg.get("model").and_then(Value::as_str),
+                    ) {
+                        let ts = record_ts(&v, mtime_ms);
+                        let out = msg
+                            .get("usage")
+                            .and_then(|u| u.get("output_tokens"))
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0) as i64;
+                        if let Some(entry) = perf_open.get_mut(mid) {
+                            entry.1 = entry.1.max(ts);
+                            entry.2 = out;
+                        } else if let Some(start) = last_request_ts {
+                            perf_open.insert(mid.to_string(), (start, ts, out, model.to_string()));
+                        }
+                    }
                     let Some(items) = msg.get("content").and_then(Value::as_array) else {
                         continue;
                     };
@@ -298,6 +323,10 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
                     }
                 }
                 Some("user") => {
+                    // Every `user` record (a prompt or a tool_result) is the
+                    // request anchor for whichever `assistant` response follows.
+                    let ts = record_ts(&v, mtime_ms);
+                    last_request_ts = Some(ts);
                     let Some(items) = v
                         .get("message")
                         .and_then(|m| m.get("content"))
@@ -305,7 +334,6 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
                     else {
                         continue;
                     };
-                    let ts = record_ts(&v, mtime_ms);
                     for item in items
                         .iter()
                         .filter(|i| i.get("type").and_then(Value::as_str) == Some("tool_result"))
@@ -346,6 +374,24 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
         match store.upsert_spans(&spans) {
             Ok(n) => report.spans_upserted += n,
             Err(e) => report.errors.push(format!("span upsert failed: {e}")),
+        }
+        let perf_rows: Vec<PerfRow> = perf_open
+            .into_iter()
+            .map(|(mid, (start, end, out, model))| PerfRow {
+                id: format!("claude:{mid}"),
+                agent: Agent::Claude,
+                session_id: session_id.clone(),
+                model,
+                start_ms: start,
+                end_ms: end,
+                gen_ms: end - start,
+                output_tokens: out,
+                ttft_ms: None,
+                precise: false,
+            })
+            .collect();
+        if let Err(e) = store.upsert_perf(&perf_rows) {
+            report.errors.push(format!("perf upsert failed: {e}"));
         }
         if let Err(e) = store.set_file_progress(&FileProgress {
             path: key,
@@ -831,6 +877,30 @@ mod tests {
         )
     }
 
+    /// A plain user prompt record (not a tool_result) at an explicit timestamp.
+    fn user_prompt_at(ts: &str) -> String {
+        format!(r#"{{"type":"user","cwd":"/tmp/proj","timestamp":"{ts}","message":{{"content":"hi"}}}}"#)
+    }
+
+    /// One `assistant` chunk of a (possibly split) message, at an explicit
+    /// timestamp and cumulative `usage.output_tokens`.
+    fn assistant_chunk_at(mid: &str, ts: &str, output: u64) -> String {
+        format!(
+            r#"{{"type":"assistant","cwd":"/tmp/proj","timestamp":"{ts}","message":{{"id":"{mid}","model":"claude-opus-4-8","usage":{{"input_tokens":10,"output_tokens":{output},"cache_read_input_tokens":100,"cache_creation_input_tokens":1000,"output_tokens_details":{{"thinking_tokens":5}}}}}}}}"#
+        )
+    }
+
+    /// Writes `records` as a single session file under one project dir and
+    /// returns the tempdir (keep it alive) plus the `projects` root.
+    fn claude_projects_with(records: &[String]) -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let dir = projects.join(encode_cwd("/tmp/proj"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("s1.jsonl"), format!("{}\n", records.join("\n"))).unwrap();
+        (tmp, projects)
+    }
+
     fn store_at(dir: &Path) -> Store {
         Store::open(&dir.join("agent-deck.db")).unwrap()
     }
@@ -1190,6 +1260,45 @@ mod tests {
         assert_eq!(tokens.output, 50);
         assert_eq!(tokens.cache_read, 100);
         assert!(tokens.total() > 0);
+    }
+
+    #[test]
+    fn claude_split_message_yields_one_estimated_sample() {
+        let (tmp, projects) = claude_projects_with(&[
+            user_prompt_at("2026-09-23T02:02:19.282Z"),
+            assistant_chunk_at("m1", "2026-09-23T02:02:22.038Z", 130),
+            assistant_chunk_at("m1", "2026-09-23T02:02:22.043Z", 130),
+        ]);
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "claude:m1");
+        assert_eq!(rows[0].gen_ms, 2_761);
+        assert_eq!(rows[0].output_tokens, 130);
+        assert!(!rows[0].precise);
+        assert_eq!(rows[0].ttft_ms, None);
+    }
+
+    #[test]
+    fn claude_assistant_without_anchor_is_skipped() {
+        let (tmp, projects) =
+            claude_projects_with(&[assistant_chunk_at("m1", "2026-09-23T02:02:22.038Z", 130)]);
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        assert!(s.perf_samples(0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn claude_reindex_does_not_duplicate() {
+        let (tmp, projects) = claude_projects_with(&[
+            user_prompt_at("2026-09-23T02:02:19.282Z"),
+            assistant_chunk_at("m1", "2026-09-23T02:02:22.038Z", 130),
+        ]);
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        index_claude(&mut s, &projects, home());
+        assert_eq!(s.perf_samples(0).unwrap().len(), 1);
     }
 
     #[test]
