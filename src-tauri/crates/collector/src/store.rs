@@ -302,7 +302,8 @@ impl Store {
                    ttft_ms = excluded.ttft_ms, \
                    gen_ms = CASE WHEN excluded.precise = 1 THEN excluded.gen_ms \
                                  ELSE MAX(response_perf.end_ms, excluded.end_ms) - MIN(response_perf.start_ms, excluded.start_ms) END, \
-                   model = excluded.model",
+                   model = excluded.model, \
+                   precise = excluded.precise",
             )?;
             for r in rows {
                 stmt.execute(rusqlite::params![
@@ -1080,6 +1081,22 @@ mod tests {
         assert_eq!(rows[0].end_ms, 4_000);
         assert_eq!(rows[0].gen_ms, 3_000);
         assert_eq!(rows[0].output_tokens, 130);
+    }
+
+    #[test]
+    fn upsert_perf_merge_updates_precise_flag() {
+        let mut s = test_store();
+        let mut estimated = perf("claude:a", 1_000, 2_000, 1_000, 50);
+        estimated.precise = false;
+        s.upsert_perf(&[estimated]).unwrap();
+
+        let mut precise = perf("claude:a", 1_000, 2_000, 1_000, 50);
+        precise.precise = true;
+        s.upsert_perf(&[precise]).unwrap();
+
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].precise, "merged row must reflect the latest precise flag");
     }
 
     #[test]
