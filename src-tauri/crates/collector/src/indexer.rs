@@ -1,6 +1,6 @@
 use crate::live::project_name;
 use crate::model::{Agent, TokenUsage};
-use crate::store::{FileProgress, MessageRow, SpanRow, Store};
+use crate::store::{FileProgress, MessageRow, PerfRow, SpanRow, Store};
 use crate::transcript::tool_detail;
 use serde_json::Value;
 use std::fs::File;
@@ -80,7 +80,9 @@ fn jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
     if flag_observer(dir) {
         return;
     }
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if flag_observer(&p) {
@@ -94,14 +96,18 @@ fn jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
         }
     }
     // one level down: <sessionId>/subagents/agent-*.jsonl
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let session = e.path();
         if !session.is_dir() || flag_observer(&session) {
             continue;
         }
         let sub = session.join("subagents");
-        let Ok(sub_entries) = std::fs::read_dir(&sub) else { continue };
+        let Ok(sub_entries) = std::fs::read_dir(&sub) else {
+            continue;
+        };
         for se in sub_entries.flatten() {
             let sp = se.path();
             if flag_observer(&sp) {
@@ -236,7 +242,10 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
         // tool_use id -> (index into `spans`, span) so a later tool_result in the
         // same pass can close it without a second lookup.
         let mut open: std::collections::HashMap<String, usize> = Default::default();
-        for v in lines.iter().filter_map(|line| serde_json::from_str::<Value>(line).ok()) {
+        for v in lines
+            .iter()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        {
             if let Some(c) = v.get("cwd").and_then(Value::as_str) {
                 cwd = c.to_string();
             }
@@ -250,8 +259,12 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
                     if let Some(r) = claude_message_row(&v, &session_id, &project, mtime_ms) {
                         rows.push(r);
                     }
-                    let Some(msg) = v.get("message") else { continue };
-                    let Some(items) = msg.get("content").and_then(Value::as_array) else { continue };
+                    let Some(msg) = v.get("message") else {
+                        continue;
+                    };
+                    let Some(items) = msg.get("content").and_then(Value::as_array) else {
+                        continue;
+                    };
                     let tokens = msg.get("usage").map(claude_usage);
                     for item in items
                         .iter()
@@ -301,7 +314,8 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
                             continue;
                         };
                         let end_ms = Some(ts);
-                        let status = if item.get("is_error").and_then(Value::as_bool) == Some(true) {
+                        let status = if item.get("is_error").and_then(Value::as_bool) == Some(true)
+                        {
                             "error"
                         } else {
                             "ok"
@@ -364,7 +378,9 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
     let mut files = Vec::new();
     let mut stack = vec![sessions_dir.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for e in entries.flatten() {
             let p = e.path();
             if flag_observer(&p) {
@@ -414,7 +430,9 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
         let mut ordinal: i64 = 0;
         let mut rows = Vec::new();
         for line in &lines {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
             let payload = v.get("payload").unwrap_or(&Value::Null);
             match v.get("type").and_then(Value::as_str) {
                 Some("session_meta") => {
@@ -435,7 +453,8 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
                         continue;
                     }
                     ordinal += 1;
-                    let Some(usage) = payload.get("info").and_then(|i| i.get("last_token_usage")) else {
+                    let Some(usage) = payload.get("info").and_then(|i| i.get("last_token_usage"))
+                    else {
                         continue;
                     };
                     if model.is_empty() {
@@ -508,14 +527,13 @@ fn upsert_opencode_spans(
 
     let mut spans = Vec::new();
     for (id, created, data, directory, session_id) in rows.flatten() {
-        let Ok(v) = serde_json::from_str::<Value>(&data) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&data) else {
+            continue;
+        };
         let state = v.get("state").unwrap_or(&Value::Null);
         let tool = v.get("tool").and_then(Value::as_str).unwrap_or("tool");
         let time = state.get("time").unwrap_or(&Value::Null);
-        let start_ms = time
-            .get("start")
-            .and_then(Value::as_i64)
-            .unwrap_or(created);
+        let start_ms = time.get("start").and_then(Value::as_i64).unwrap_or(created);
         let end_ms = time.get("end").and_then(Value::as_i64);
         let status = match state.get("status").and_then(Value::as_str) {
             Some("completed") => "ok",
@@ -539,6 +557,142 @@ fn upsert_opencode_spans(
     store.upsert_spans(&spans)
 }
 
+/// Model string for an opencode assistant message, following the same
+/// `providerID`/`modelID` rule as the message pass. `None` when neither field
+/// is usable.
+fn opencode_message_model(msg_data: &Value) -> Option<String> {
+    match (
+        msg_data.get("providerID").and_then(Value::as_str),
+        msg_data.get("modelID").and_then(Value::as_str),
+    ) {
+        (Some(p), Some(m)) => Some(format!("{p}/{m}")),
+        (None, Some(m)) => Some(m.to_string()),
+        _ => None,
+    }
+}
+
+/// Precise per-step generation timing from opencode step-start/step-finish
+/// parts. Uses a 1h lookback (`since - 3_600_000`, clamped at 0) rather than
+/// `since` directly: the message pass advances `since` past a message's
+/// `time_created`, so a message still streaming when first indexed would
+/// otherwise never get its later steps. Re-reading is safe because rows
+/// upsert idempotently by id.
+fn upsert_opencode_perf(
+    store: &mut Store,
+    conn: &rusqlite::Connection,
+    since: i64,
+    report: &mut IndexReport,
+) {
+    let lookback = (since - 3_600_000).max(0);
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT p.id, p.message_id, p.session_id, p.time_created, p.data, m.data \
+         FROM part p JOIN message m ON m.id = p.message_id \
+         WHERE m.time_created > ?1 ORDER BY p.message_id, p.time_created, p.id",
+    ) else {
+        report.errors.push("perf query failed".to_string());
+        return;
+    };
+    let rows = stmt.query_map([lookback], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, i64>(3)?,
+            r.get::<_, String>(4)?,
+            r.get::<_, String>(5)?,
+        ))
+    });
+    let Ok(rows) = rows else {
+        report.errors.push("perf query failed".to_string());
+        return;
+    };
+
+    let mut out = Vec::new();
+    let mut cur_msg: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut step_start: Option<i64> = None;
+    let mut first: Option<i64> = None;
+    let mut gen: i64 = 0;
+
+    for (part_id, message_id, session_id, created, data, msg_data) in rows.flatten() {
+        if cur_msg.as_deref() != Some(message_id.as_str()) {
+            cur_msg = Some(message_id);
+            step_start = None;
+            first = None;
+            gen = 0;
+            model = serde_json::from_str::<Value>(&msg_data)
+                .ok()
+                .as_ref()
+                .and_then(opencode_message_model);
+        }
+        let Ok(v) = serde_json::from_str::<Value>(&data) else {
+            continue;
+        };
+        match v.get("type").and_then(Value::as_str) {
+            Some("step-start") => {
+                step_start = Some(created);
+                first = None;
+                gen = 0;
+            }
+            Some("text") | Some("reasoning") => {
+                let Some(time) = v.get("time") else { continue };
+                let start = time.get("start").and_then(Value::as_i64);
+                let end = time.get("end").and_then(Value::as_i64);
+                if let (Some(start), Some(end)) = (start, end) {
+                    gen += (end - start).max(0);
+                }
+                if let Some(start) = start {
+                    first = Some(first.map_or(start, |f| f.min(start)));
+                }
+            }
+            Some("tool") => {
+                let tool_start = v
+                    .get("state")
+                    .and_then(|s| s.get("time"))
+                    .and_then(|t| t.get("start"))
+                    .and_then(Value::as_i64);
+                if let Some(tool_start) = tool_start {
+                    gen += (tool_start - created).max(0);
+                }
+                first = Some(first.map_or(created, |f| f.min(created)));
+            }
+            Some("step-finish") => {
+                if gen > 0 {
+                    if let Some(model) = &model {
+                        let tokens = v.get("tokens").cloned().unwrap_or(Value::Null);
+                        let output = tokens.get("output").and_then(Value::as_i64).unwrap_or(0);
+                        let reasoning =
+                            tokens.get("reasoning").and_then(Value::as_i64).unwrap_or(0);
+                        out.push(PerfRow {
+                            id: format!("opencode:{part_id}"),
+                            agent: Agent::Opencode,
+                            session_id,
+                            model: model.clone(),
+                            start_ms: step_start.unwrap_or(created),
+                            end_ms: created,
+                            gen_ms: gen,
+                            output_tokens: output + reasoning,
+                            ttft_ms: step_start
+                                .zip(first)
+                                .map(|(start, f)| (f - start).max(0)),
+                            precise: true,
+                        });
+                    }
+                }
+                step_start = None;
+                first = None;
+                gen = 0;
+            }
+            _ => {}
+        }
+    }
+
+    match store.upsert_perf(&out) {
+        Ok(_) => {}
+        Err(e) => report.errors.push(format!("perf upsert failed: {e}")),
+    }
+}
+
 /// Walks the opencode SQLite DB read-only and indexes assistant messages.
 pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
     let mut report = IndexReport::default();
@@ -546,10 +700,9 @@ pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
         return report;
     }
     let key = db.to_string_lossy().to_string();
-    let Ok(conn) = rusqlite::Connection::open_with_flags(
-        db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    ) else {
+    let Ok(conn) =
+        rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+    else {
         report.errors.push(format!("open failed: {key}"));
         return report;
     };
@@ -585,7 +738,9 @@ pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
     let mut max_ts = since;
     for (id, ts, data, directory) in rows.flatten() {
         max_ts = max_ts.max(ts);
-        let Ok(v) = serde_json::from_str::<Value>(&data) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&data) else {
+            continue;
+        };
         if v.get("role").and_then(Value::as_str) != Some("assistant") {
             continue;
         }
@@ -622,6 +777,7 @@ pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
         Ok(n) => report.messages_upserted += n,
         Err(e) => report.errors.push(format!("upsert failed: {e}")),
     }
+    upsert_opencode_perf(store, &conn, since, &mut report);
     match upsert_opencode_spans(store, &conn, since, home) {
         Ok(n) => report.spans_upserted += n,
         Err(e) => report.errors.push(format!("span upsert failed: {e}")),
@@ -644,7 +800,11 @@ mod tests {
     use crate::transcript::encode_cwd;
     use std::io::Write;
     fn append(path: &Path, s: &str) {
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
         f.write_all(s.as_bytes()).unwrap();
     }
 
@@ -681,7 +841,10 @@ mod tests {
         // 2026-09-21T09:42:37.055Z (verified against a reference epoch conversion).
         let expected = 1789983757055;
         assert_eq!(parse_iso_ms("2026-09-21T09:42:37.055Z"), Some(expected));
-        assert_eq!(parse_iso_ms("2026-09-21T16:42:37.055+07:00"), Some(expected));
+        assert_eq!(
+            parse_iso_ms("2026-09-21T16:42:37.055+07:00"),
+            Some(expected)
+        );
         assert_eq!(parse_iso_ms("not a date"), None);
     }
 
@@ -724,7 +887,15 @@ mod tests {
         std::fs::create_dir_all(&observer).unwrap();
         std::fs::write(
             observer.join("o1.jsonl"),
-            format!("{}\n", claude_assistant("m1", "/Users/yolk/.claude-mem/observer-sessions", "claude-sonnet-5", 9)),
+            format!(
+                "{}\n",
+                claude_assistant(
+                    "m1",
+                    "/Users/yolk/.claude-mem/observer-sessions",
+                    "claude-sonnet-5",
+                    9
+                )
+            ),
         )
         .unwrap();
 
@@ -741,7 +912,14 @@ mod tests {
         let projects = tmp.path().join("projects");
         let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("s1.jsonl"), format!("{}\n", claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 5))).unwrap();
+        std::fs::write(
+            dir.join("s1.jsonl"),
+            format!(
+                "{}\n",
+                claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 5)
+            ),
+        )
+        .unwrap();
 
         let mut s = store_at(tmp.path());
         let first = index_claude(&mut s, &projects, home());
@@ -762,11 +940,24 @@ mod tests {
         let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("s1.jsonl");
-        std::fs::write(&file, format!("{}\n", claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 5))).unwrap();
+        std::fs::write(
+            &file,
+            format!(
+                "{}\n",
+                claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 5)
+            ),
+        )
+        .unwrap();
 
         let mut s = store_at(tmp.path());
         index_claude(&mut s, &projects, home());
-        append(&file, &format!("{}\n", claude_assistant("m2", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 7)));
+        append(
+            &file,
+            &format!(
+                "{}\n",
+                claude_assistant("m2", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 7)
+            ),
+        );
 
         let second = index_claude(&mut s, &projects, home());
         assert_eq!(second.messages_upserted, 1);
@@ -783,13 +974,27 @@ mod tests {
         let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("s1.jsonl");
-        std::fs::write(&file, format!("{}\n", claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 500))).unwrap();
+        std::fs::write(
+            &file,
+            format!(
+                "{}\n",
+                claude_assistant("m1", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 500)
+            ),
+        )
+        .unwrap();
 
         let mut s = store_at(tmp.path());
         index_claude(&mut s, &projects, home());
         assert_eq!(s.totals(0).unwrap().tokens.output, 500);
 
-        std::fs::write(&file, format!("{}\n", claude_assistant("m2", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 3))).unwrap();
+        std::fs::write(
+            &file,
+            format!(
+                "{}\n",
+                claude_assistant("m2", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 3)
+            ),
+        )
+        .unwrap();
         index_claude(&mut s, &projects, home());
 
         let models = s.by_model(0).unwrap();
@@ -805,8 +1010,22 @@ mod tests {
         let dir = projects.join(encode_cwd("/Users/yolk/Dev/submo"));
         let sub = dir.join("sess-1").join("subagents");
         std::fs::create_dir_all(&sub).unwrap();
-        std::fs::write(dir.join("sess-1.jsonl"), format!("{}\n", claude_assistant("m1", "/Users/yolk/Dev/submo", "claude-sonnet-5", 5))).unwrap();
-        std::fs::write(sub.join("agent-x.jsonl"), format!("{}\n", claude_assistant("m2", "/Users/yolk/Dev/submo", "claude-haiku-4-5", 9))).unwrap();
+        std::fs::write(
+            dir.join("sess-1.jsonl"),
+            format!(
+                "{}\n",
+                claude_assistant("m1", "/Users/yolk/Dev/submo", "claude-sonnet-5", 5)
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            sub.join("agent-x.jsonl"),
+            format!(
+                "{}\n",
+                claude_assistant("m2", "/Users/yolk/Dev/submo", "claude-haiku-4-5", 9)
+            ),
+        )
+        .unwrap();
 
         let mut s = store_at(tmp.path());
         let r = index_claude(&mut s, &projects, home());
@@ -827,7 +1046,10 @@ mod tests {
         let synthetic = r#"{"type":"assistant","cwd":"/Users/yolk/Dev/kirimi","timestamp":"2026-09-21T09:42:37.055Z","message":{"id":"sy","model":"<synthetic>","usage":{"input_tokens":1,"output_tokens":1}}}"#;
         std::fs::write(
             dir.join("s1.jsonl"),
-            format!("{no_model}\n{synthetic}\n{}\n", claude_assistant("ok", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 4)),
+            format!(
+                "{no_model}\n{synthetic}\n{}\n",
+                claude_assistant("ok", "/Users/yolk/Dev/kirimi", "claude-sonnet-5", 4)
+            ),
         )
         .unwrap();
 
@@ -846,7 +1068,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("s1.jsonl"),
-            format!("{}\n{}\n", claude_tool_use("m1", "t1", "Bash", "bun test"), claude_tool_result("t1", false)),
+            format!(
+                "{}\n{}\n",
+                claude_tool_use("m1", "t1", "Bash", "bun test"),
+                claude_tool_result("t1", false)
+            ),
         )
         .unwrap();
 
@@ -872,7 +1098,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("s1.jsonl"),
-            format!("{}\n{}\n", claude_tool_use("m1", "t1", "Bash", "false"), claude_tool_result("t1", true)),
+            format!(
+                "{}\n{}\n",
+                claude_tool_use("m1", "t1", "Bash", "false"),
+                claude_tool_result("t1", true)
+            ),
         )
         .unwrap();
 
@@ -892,7 +1122,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("s1.jsonl"),
-            format!("{}\n", claude_tool_use("m1", "t1", "Read", "/Users/yolk/Dev/kirimi/src/a.ts")),
+            format!(
+                "{}\n",
+                claude_tool_use("m1", "t1", "Read", "/Users/yolk/Dev/kirimi/src/a.ts")
+            ),
         )
         .unwrap();
 
@@ -911,7 +1144,11 @@ mod tests {
         let dir = projects.join(encode_cwd("/Users/yolk/Dev/kirimi"));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("s1.jsonl");
-        std::fs::write(&file, format!("{}\n", claude_tool_use("m1", "t1", "Bash", "bun test"))).unwrap();
+        std::fs::write(
+            &file,
+            format!("{}\n", claude_tool_use("m1", "t1", "Bash", "bun test")),
+        )
+        .unwrap();
 
         let mut s = store_at(tmp.path());
         index_claude(&mut s, &projects, home());
@@ -946,7 +1183,10 @@ mod tests {
         let detail = spans[0].detail.as_ref().unwrap();
         assert_eq!(detail.chars().count(), 80);
         assert_eq!(detail, &long[..80]);
-        let tokens = spans[0].tokens.clone().expect("span should carry the opener's usage");
+        let tokens = spans[0]
+            .tokens
+            .clone()
+            .expect("span should carry the opener's usage");
         assert_eq!(tokens.output, 50);
         assert_eq!(tokens.cache_read, 100);
         assert!(tokens.total() > 0);
@@ -966,7 +1206,11 @@ mod tests {
         };
         std::fs::write(
             sessions.join("rollout-2026-04-04T05-54-28-abc.jsonl"),
-            format!("{meta}\n{ctx}\n{}\n{}\n", count(100, 40, 7, 3), count(200, 80, 9, 4)),
+            format!(
+                "{meta}\n{ctx}\n{}\n{}\n",
+                count(100, 40, 7, 3),
+                count(200, 80, 9, 4)
+            ),
         )
         .unwrap();
 
@@ -1044,11 +1288,144 @@ mod tests {
         .unwrap();
     }
 
+    fn insert_part(db: &Path, id: &str, msg: &str, created: i64, data: serde_json::Value) {
+        let c = rusqlite::Connection::open(db).unwrap();
+        c.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?1, ?2, 'ses_1', ?3, ?3, ?4)",
+            rusqlite::params![id, msg, created, data.to_string()],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn opencode_step_yields_precise_sample() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_message(&db, "msg1", 1_000, "assistant", 0, 0);
+        insert_part(&db, "p1", "msg1", 1_000, serde_json::json!({"type":"step-start"}));
+        insert_part(
+            &db,
+            "p2",
+            "msg1",
+            1_400,
+            serde_json::json!({"type":"reasoning","time":{"start":1_400,"end":1_900}}),
+        );
+        insert_part(
+            &db,
+            "p3",
+            "msg1",
+            1_900,
+            serde_json::json!({"type":"text","time":{"start":1_900,"end":2_900}}),
+        );
+        insert_part(
+            &db,
+            "p4",
+            "msg1",
+            3_000,
+            serde_json::json!({"type":"step-finish","tokens":{"output":120,"reasoning":30}}),
+        );
+        let mut s = store_at(tmp.path());
+        index_opencode(&mut s, &db, home());
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.id, "opencode:p4");
+        assert_eq!(r.model, "kn/deepseek-v4-1-flash");
+        assert_eq!(r.output_tokens, 150);
+        assert_eq!(r.gen_ms, 1_500);
+        assert_eq!(r.ttft_ms, Some(400));
+        assert!(r.precise);
+        drop(tmp);
+    }
+
+    #[test]
+    fn opencode_step_excludes_tool_execution() {
+        // tool input streams 200ms (created 1_100 -> state.time.start 1_300), then executes 60s
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_message(&db, "msg1", 1_000, "assistant", 0, 0);
+        insert_part(&db, "p1", "msg1", 1_000, serde_json::json!({"type":"step-start"}));
+        insert_part(
+            &db,
+            "p2",
+            "msg1",
+            1_100,
+            serde_json::json!({"type":"tool","state":{"time":{"start":1_300,"end":61_300}}}),
+        );
+        insert_part(
+            &db,
+            "p3",
+            "msg1",
+            61_400,
+            serde_json::json!({"type":"step-finish","tokens":{"output":40,"reasoning":0}}),
+        );
+        let mut s = store_at(tmp.path());
+        index_opencode(&mut s, &db, home());
+        let r = &s.perf_samples(0).unwrap()[0];
+        assert_eq!(r.gen_ms, 200);
+        assert_eq!(r.ttft_ms, Some(100));
+        drop(tmp);
+    }
+
+    #[test]
+    fn opencode_step_without_timed_parts_is_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_message(&db, "msg1", 1_000, "assistant", 0, 0);
+        insert_part(&db, "p1", "msg1", 1_000, serde_json::json!({"type":"step-start"}));
+        insert_part(
+            &db,
+            "p2",
+            "msg1",
+            2_000,
+            serde_json::json!({"type":"step-finish","tokens":{"output":40,"reasoning":0}}),
+        );
+        let mut s = store_at(tmp.path());
+        index_opencode(&mut s, &db, home());
+        assert!(s.perf_samples(0).unwrap().is_empty());
+        drop(tmp);
+    }
+
+    #[test]
+    fn opencode_perf_reindex_does_not_duplicate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_message(&db, "msg1", 1_000, "assistant", 0, 0);
+        insert_part(&db, "p1", "msg1", 1_000, serde_json::json!({"type":"step-start"}));
+        insert_part(
+            &db,
+            "p2",
+            "msg1",
+            1_100,
+            serde_json::json!({"type":"text","time":{"start":1_100,"end":2_100}}),
+        );
+        insert_part(
+            &db,
+            "p3",
+            "msg1",
+            2_200,
+            serde_json::json!({"type":"step-finish","tokens":{"output":40,"reasoning":0}}),
+        );
+        let mut s = store_at(tmp.path());
+        index_opencode(&mut s, &db, home());
+        // second pass: no new messages, but the 1h lookback re-reads this message's parts
+        index_opencode(&mut s, &db, home());
+        assert_eq!(s.perf_samples(0).unwrap().len(), 1);
+        drop(tmp);
+    }
+
     #[test]
     fn opencode_spans_map_status() {
         let tmp = tempfile::tempdir().unwrap();
         let db = opencode_db(tmp.path());
-        insert_tool_part(&db, "prt_ok", 100, "bash", "completed", Some((110, Some(120))));
+        insert_tool_part(
+            &db,
+            "prt_ok",
+            100,
+            "bash",
+            "completed",
+            Some((110, Some(120))),
+        );
         insert_tool_part(&db, "prt_err", 200, "bash", "error", Some((210, Some(220))));
         insert_tool_part(&db, "prt_run", 300, "bash", "running", Some((310, None)));
 
@@ -1071,7 +1448,14 @@ mod tests {
     fn opencode_span_uses_state_times_then_falls_back() {
         let tmp = tempfile::tempdir().unwrap();
         let db = opencode_db(tmp.path());
-        insert_tool_part(&db, "prt_times", 100, "bash", "completed", Some((110, Some(120))));
+        insert_tool_part(
+            &db,
+            "prt_times",
+            100,
+            "bash",
+            "completed",
+            Some((110, Some(120))),
+        );
         insert_tool_part(&db, "prt_fallback", 400, "bash", "running", None);
 
         let mut s = store_at(tmp.path());
@@ -1084,7 +1468,10 @@ mod tests {
         assert_eq!(timed.end_ms, Some(120));
 
         let fallback = get("opencode:prt_fallback");
-        assert_eq!(fallback.start_ms, 400, "must fall back to part.time_created");
+        assert_eq!(
+            fallback.start_ms, 400,
+            "must fall back to part.time_created"
+        );
         assert_eq!(fallback.end_ms, None);
     }
 
@@ -1092,13 +1479,26 @@ mod tests {
     fn opencode_spans_store_no_command_text() {
         let tmp = tempfile::tempdir().unwrap();
         let db = opencode_db(tmp.path());
-        insert_tool_part(&db, "prt_secret", 100, "bash", "completed", Some((110, Some(120))));
+        insert_tool_part(
+            &db,
+            "prt_secret",
+            100,
+            "bash",
+            "completed",
+            Some((110, Some(120))),
+        );
 
         let mut s = store_at(tmp.path());
         index_opencode(&mut s, &db, home());
         let spans = s.spans(0, i64::MAX).unwrap();
-        let span = spans.iter().find(|x| x.id == "opencode:prt_secret").unwrap();
-        assert_eq!(span.detail, None, "opencode must never persist command text");
+        let span = spans
+            .iter()
+            .find(|x| x.id == "opencode:prt_secret")
+            .unwrap();
+        assert_eq!(
+            span.detail, None,
+            "opencode must never persist command text"
+        );
         assert_eq!(span.tokens, None);
     }
 
