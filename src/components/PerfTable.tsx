@@ -1,7 +1,8 @@
 import { Fragment, useState } from "react";
 import { AgentIcon } from "@/components/BrandIcon";
+import { useT } from "@/i18n";
 import type { PerfAgg } from "@/lib/api";
-import { ESTIMATE_HINT, formatTps, formatTtft, LOW_SAMPLES, type PerfSortKey } from "@/lib/perf";
+import { formatTps, formatTtft, LOW_SAMPLES, type PerfSortKey } from "@/lib/perf";
 
 const SortHead = ({
   children,
@@ -44,8 +45,10 @@ const Row = ({
   expanded: boolean;
   onToggleExpand: (key: string) => void;
 }) => {
+  const t = useT();
   const lowSamples = row.samples < LOW_SAMPLES;
   const hasChildren = row.children.length > 0;
+  const estimateHint = t("format.estimateHint");
   return (
     <tr
       onClick={() => onSelect(row.key)}
@@ -70,10 +73,10 @@ const Row = ({
           {row.label}
         </span>
       </td>
-      <td className="py-3 text-right font-mono text-[12.5px] font-semibold text-fg" title={!row.precise ? ESTIMATE_HINT : undefined}>
+      <td className="py-3 text-right font-mono text-[12.5px] font-semibold text-fg" title={!row.precise ? estimateHint : undefined}>
         {formatTps(row.tpsP50, row.precise)}
       </td>
-      <td className="py-3 text-right font-mono text-[12.5px] text-fg-2" title={!row.precise ? ESTIMATE_HINT : undefined}>
+      <td className="py-3 text-right font-mono text-[12.5px] text-fg-2" title={!row.precise ? estimateHint : undefined}>
         {formatTps(row.tpsP10, row.precise)}
       </td>
       <td className="py-3 text-right font-mono text-[12.5px] text-fg-2">{formatTtft(row.ttftP50Ms)}</td>

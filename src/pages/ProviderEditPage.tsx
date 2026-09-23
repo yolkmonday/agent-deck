@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { KeyField } from "@/components/KeyField";
 import { ModelList } from "@/components/ModelList";
 import { ProviderIcon } from "@/components/BrandIcon";
+import { locale } from "@/i18n";
 import type { HeaderStyle, OcModel, OcProviderInput } from "@/lib/api";
 import { configBackups, configRestore, modelsOverview, secretMigrateInline } from "@/lib/api";
 import { providerDelete, providerSave } from "@/lib/api";
@@ -66,7 +67,7 @@ const BackupMenu = ({ onClose }: { onClose: () => void }) => {
                 >
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="truncate font-mono text-[11.5px] text-fg">{b.path}</span>
-                    <span className="text-[11px] text-fg-3">{new Date(b.atMs).toLocaleString("id-ID")}</span>
+                    <span className="text-[11px] text-fg-3">{new Date(b.atMs).toLocaleString(locale())}</span>
                   </div>
                   {pending === b.path ? (
                     <div className="flex items-center gap-2">

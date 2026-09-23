@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AgentIcon } from "@/components/BrandIcon";
+import { locale } from "@/i18n";
 import type { Agent } from "@/lib/types";
 import { useLive } from "@/store/live";
 
@@ -7,7 +8,7 @@ const dot = { waiting: "bg-waiting", busy: "bg-busy", ok: "bg-ok", idle: "bg-idl
 const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 
 const clock = (ms: number) =>
-  new Date(ms).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  new Date(ms).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 
 const FILTERS: { key: Agent | "all"; label: string }[] = [
   { key: "all", label: "Semua" },

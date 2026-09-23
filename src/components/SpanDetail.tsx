@@ -1,3 +1,4 @@
+import { locale } from "@/i18n";
 import type { TimelineSpan } from "@/lib/api";
 import { formatDuration, formatTokens, totalTokens } from "@/lib/format";
 
@@ -9,7 +10,7 @@ const statusPill = {
 } as const;
 
 const clock = (ms: number) =>
-  new Date(ms).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/\./g, ":");
+  new Date(ms).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/\./g, ":");
 
 const Row = ({ label, value }: { label: string; value: string }) => (
   <div className="flex items-center justify-between gap-3 border-b border-border/60 py-2.5 last:border-0">
