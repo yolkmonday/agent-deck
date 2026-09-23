@@ -1,6 +1,6 @@
 [package]
 name = "agent-deck"
-version = "0.2.0"
+version = "0.2.1"
 description = "Agent Deck — a live dashboard for coding agent sessions"
 authors = ["Agent Deck contributors"]
 edition = "2021"
