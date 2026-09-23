@@ -187,6 +187,64 @@ fn claude_message_row(
     )
 }
 
+/// Per-response performance samples from a Claude session's already-parsed
+/// records: the last `user` record's timestamp anchors the next `assistant`
+/// response sharing a message id, and later chunks of a split message merge
+/// into the same entry (latest end_ms, latest output_tokens). Shared by the
+/// normal incremental pass and the perf-only backfill, so both anchor
+/// samples the same way.
+fn claude_perf_from_lines(lines: &[Value], session_id: &str, mtime_ms: i64) -> Vec<PerfRow> {
+    let mut last_request_ts: Option<i64> = None;
+    // message.id -> (start_ms, end_ms, output_tokens, model)
+    let mut perf_open: std::collections::HashMap<String, (i64, i64, i64, String)> =
+        Default::default();
+    for v in lines {
+        match v.get("type").and_then(Value::as_str) {
+            Some("assistant") => {
+                let Some(msg) = v.get("message") else { continue };
+                if let (Some(mid), Some(model)) = (
+                    msg.get("id").and_then(Value::as_str),
+                    msg.get("model").and_then(Value::as_str),
+                ) {
+                    let ts = record_ts(v, mtime_ms);
+                    let out = msg
+                        .get("usage")
+                        .and_then(|u| u.get("output_tokens"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as i64;
+                    if let Some(entry) = perf_open.get_mut(mid) {
+                        entry.1 = entry.1.max(ts);
+                        entry.2 = out;
+                    } else if let Some(start) = last_request_ts {
+                        perf_open.insert(mid.to_string(), (start, ts, out, model.to_string()));
+                    }
+                }
+            }
+            Some("user") => {
+                // Every `user` record (a prompt or a tool_result) is the
+                // request anchor for whichever `assistant` response follows.
+                last_request_ts = Some(record_ts(v, mtime_ms));
+            }
+            _ => {}
+        }
+    }
+    perf_open
+        .into_iter()
+        .map(|(mid, (start, end, out, model))| PerfRow {
+            id: format!("claude:{mid}"),
+            agent: Agent::Claude,
+            session_id: session_id.to_string(),
+            model,
+            start_ms: start,
+            end_ms: end,
+            gen_ms: end - start,
+            output_tokens: out,
+            ttft_ms: None,
+            precise: false,
+        })
+        .collect()
+}
+
 pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> IndexReport {
     let mut report = IndexReport::default();
     if !projects_dir.exists() {
@@ -242,18 +300,11 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
         // tool_use id -> (index into `spans`, span) so a later tool_result in the
         // same pass can close it without a second lookup.
         let mut open: std::collections::HashMap<String, usize> = Default::default();
-        // The most recent `user` record's timestamp (prompt or tool_result):
-        // the request anchor for the next assistant response.
-        let mut last_request_ts: Option<i64> = None;
-        // message.id -> (start_ms, end_ms, output_tokens, model) for an
-        // estimated response-speed sample, possibly spanning several
-        // `assistant` records that share the same message.id.
-        let mut perf_open: std::collections::HashMap<String, (i64, i64, i64, String)> =
-            Default::default();
-        for v in lines
+        let parsed: Vec<Value> = lines
             .iter()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        {
+            .collect();
+        for v in &parsed {
             if let Some(c) = v.get("cwd").and_then(Value::as_str) {
                 cwd = c.to_string();
             }
@@ -264,29 +315,12 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
             };
             match v.get("type").and_then(Value::as_str) {
                 Some("assistant") => {
-                    if let Some(r) = claude_message_row(&v, &session_id, &project, mtime_ms) {
+                    if let Some(r) = claude_message_row(v, &session_id, &project, mtime_ms) {
                         rows.push(r);
                     }
                     let Some(msg) = v.get("message") else {
                         continue;
                     };
-                    if let (Some(mid), Some(model)) = (
-                        msg.get("id").and_then(Value::as_str),
-                        msg.get("model").and_then(Value::as_str),
-                    ) {
-                        let ts = record_ts(&v, mtime_ms);
-                        let out = msg
-                            .get("usage")
-                            .and_then(|u| u.get("output_tokens"))
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0) as i64;
-                        if let Some(entry) = perf_open.get_mut(mid) {
-                            entry.1 = entry.1.max(ts);
-                            entry.2 = out;
-                        } else if let Some(start) = last_request_ts {
-                            perf_open.insert(mid.to_string(), (start, ts, out, model.to_string()));
-                        }
-                    }
                     let Some(items) = msg.get("content").and_then(Value::as_array) else {
                         continue;
                     };
@@ -301,7 +335,7 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
                         ) else {
                             continue;
                         };
-                        let ts = record_ts(&v, mtime_ms);
+                        let ts = record_ts(v, mtime_ms);
                         open.insert(id.to_string(), spans.len());
                         spans.push(SpanRow {
                             id: format!("claude:{id}"),
@@ -323,10 +357,7 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
                     }
                 }
                 Some("user") => {
-                    // Every `user` record (a prompt or a tool_result) is the
-                    // request anchor for whichever `assistant` response follows.
-                    let ts = record_ts(&v, mtime_ms);
-                    last_request_ts = Some(ts);
+                    let ts = record_ts(v, mtime_ms);
                     let Some(items) = v
                         .get("message")
                         .and_then(|m| m.get("content"))
@@ -375,21 +406,7 @@ pub fn index_claude(store: &mut Store, projects_dir: &Path, home: &str) -> Index
             Ok(n) => report.spans_upserted += n,
             Err(e) => report.errors.push(format!("span upsert failed: {e}")),
         }
-        let perf_rows: Vec<PerfRow> = perf_open
-            .into_iter()
-            .map(|(mid, (start, end, out, model))| PerfRow {
-                id: format!("claude:{mid}"),
-                agent: Agent::Claude,
-                session_id: session_id.clone(),
-                model,
-                start_ms: start,
-                end_ms: end,
-                gen_ms: end - start,
-                output_tokens: out,
-                ttft_ms: None,
-                precise: false,
-            })
-            .collect();
+        let perf_rows = claude_perf_from_lines(&parsed, &session_id, mtime_ms);
         if let Err(e) = store.upsert_perf(&perf_rows) {
             report.errors.push(format!("perf upsert failed: {e}"));
         }
@@ -414,6 +431,91 @@ fn codex_token_usage(v: &Value) -> TokenUsage {
         cache_write: get("cache_write_input_tokens"),
         reasoning: get("reasoning_output_tokens"),
     }
+}
+
+/// Per-response performance samples from a Codex session's already-parsed
+/// records. A `function_call_output` or user `response_item`, or a
+/// `task_started` event, anchors the request; the next `token_count` event
+/// after that anchor closes the sample. Ids are `codex:{stem}:{ts}` (not
+/// ordinal-based), so this is independent of the message-row ordinal and
+/// safe to re-run over the same lines without corrupting anything. Shared by
+/// the normal incremental pass and the perf-only backfill.
+fn codex_perf_from_lines(lines: &[Value], stem: &str, mtime_ms: i64) -> Vec<PerfRow> {
+    let mut model = String::new();
+    let mut last_request_ts: Option<i64> = None;
+    let mut out = Vec::new();
+    for v in lines {
+        let payload = v.get("payload").unwrap_or(&Value::Null);
+        match v.get("type").and_then(Value::as_str) {
+            Some("turn_context") => {
+                if let Some(m) = payload.get("model").and_then(Value::as_str) {
+                    model = m.to_string();
+                }
+            }
+            Some("response_item") => {
+                let ptype = payload.get("type").and_then(Value::as_str);
+                let is_user_message = ptype == Some("message")
+                    && payload.get("role").and_then(Value::as_str) == Some("user");
+                if ptype == Some("function_call_output") || is_user_message {
+                    if let Some(ts) = v
+                        .get("timestamp")
+                        .and_then(Value::as_str)
+                        .and_then(parse_iso_ms)
+                    {
+                        last_request_ts = Some(ts);
+                    }
+                }
+            }
+            Some("event_msg") => {
+                let etype = payload.get("type").and_then(Value::as_str);
+                if etype == Some("task_started") {
+                    if let Some(ts) = v
+                        .get("timestamp")
+                        .and_then(Value::as_str)
+                        .and_then(parse_iso_ms)
+                    {
+                        last_request_ts = Some(ts);
+                    }
+                    continue;
+                }
+                if etype != Some("token_count") {
+                    continue;
+                }
+                let Some(usage) = payload.get("info").and_then(|i| i.get("last_token_usage"))
+                else {
+                    continue;
+                };
+                if model.is_empty() {
+                    continue;
+                }
+                let ts = v
+                    .get("timestamp")
+                    .and_then(Value::as_str)
+                    .and_then(parse_iso_ms)
+                    .unwrap_or(mtime_ms);
+                let tokens = codex_token_usage(usage);
+                if let Some(a) = last_request_ts {
+                    if ts > a {
+                        out.push(PerfRow {
+                            id: format!("codex:{stem}:{ts}"),
+                            agent: Agent::Codex,
+                            session_id: stem.to_string(),
+                            model: model.clone(),
+                            start_ms: a,
+                            end_ms: ts,
+                            gen_ms: ts - a,
+                            output_tokens: (tokens.output + tokens.reasoning) as i64,
+                            ttft_ms: None,
+                            precise: false,
+                        });
+                    }
+                }
+                last_request_ts = None;
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexReport {
@@ -475,12 +577,11 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
         let mut cwd = String::new();
         let mut ordinal: i64 = 0;
         let mut rows = Vec::new();
-        let mut perf_rows: Vec<PerfRow> = Vec::new();
-        let mut last_request_ts: Option<i64> = None;
-        for line in &lines {
-            let Ok(v) = serde_json::from_str::<Value>(line) else {
-                continue;
-            };
+        let parsed: Vec<Value> = lines
+            .iter()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .collect();
+        for v in &parsed {
             let payload = v.get("payload").unwrap_or(&Value::Null);
             match v.get("type").and_then(Value::as_str) {
                 Some("session_meta") => {
@@ -496,32 +597,8 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
                         model = m.to_string();
                     }
                 }
-                Some("response_item") => {
-                    let ptype = payload.get("type").and_then(Value::as_str);
-                    let is_user_message = ptype == Some("message")
-                        && payload.get("role").and_then(Value::as_str) == Some("user");
-                    if ptype == Some("function_call_output") || is_user_message {
-                        if let Some(ts) = v
-                            .get("timestamp")
-                            .and_then(Value::as_str)
-                            .and_then(parse_iso_ms)
-                        {
-                            last_request_ts = Some(ts);
-                        }
-                    }
-                }
                 Some("event_msg") => {
                     let etype = payload.get("type").and_then(Value::as_str);
-                    if etype == Some("task_started") {
-                        if let Some(ts) = v
-                            .get("timestamp")
-                            .and_then(Value::as_str)
-                            .and_then(parse_iso_ms)
-                        {
-                            last_request_ts = Some(ts);
-                        }
-                        continue;
-                    }
                     if etype != Some("token_count") {
                         continue;
                     }
@@ -553,23 +630,6 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
                         ts_ms: ts,
                         tokens: tokens.clone(),
                     });
-                    if let Some(a) = last_request_ts {
-                        if ts > a {
-                            perf_rows.push(PerfRow {
-                                id: format!("codex:{stem}:{ts}"),
-                                agent: Agent::Codex,
-                                session_id: stem.clone(),
-                                model: model.clone(),
-                                start_ms: a,
-                                end_ms: ts,
-                                gen_ms: ts - a,
-                                output_tokens: (tokens.output + tokens.reasoning) as i64,
-                                ttft_ms: None,
-                                precise: false,
-                            });
-                        }
-                    }
-                    last_request_ts = None;
                 }
                 _ => {}
             }
@@ -579,6 +639,7 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
             Ok(n) => report.messages_upserted += n,
             Err(e) => report.errors.push(format!("upsert failed: {e}")),
         }
+        let perf_rows = codex_perf_from_lines(&parsed, &stem, mtime_ms);
         if let Err(e) = store.upsert_perf(&perf_rows) {
             report.errors.push(format!("perf upsert failed: {e}"));
         }
