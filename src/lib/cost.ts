@@ -1,4 +1,3 @@
-import { t } from "@/i18n";
 import type { DailyRow } from "@/lib/api";
 import { totalTokens } from "@/lib/format";
 
@@ -9,12 +8,6 @@ export const formatUsd = (n: number): string => {
   if (Math.abs(n) < 0.01) return "<$0,01";
   return `$${n.toFixed(2).replace(".", ",")}`;
 };
-
-/** Never show a bare dollar amount for a subscription: it is an estimate of what
- *  the same tokens would have cost at API rates, not a bill.
- *  Resolved once at module load; language switches take effect after reload
- *  since consumers use this as a plain string constant, not a t() call. */
-export const NOTIONAL_HINT = t("cost.notionalHint");
 
 export const formatNotional = (n: number): string => `≈ ${formatUsd(n)}`;
 

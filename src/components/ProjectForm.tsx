@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "@/i18n";
 import type { Project, ProjectInput, TermProfile } from "@/lib/api";
 import { pickFolder } from "@/lib/pick";
+import { PROJECT_ERRORS } from "@/lib/project-errors";
 
 export const PALETTE = [
   { value: "#4C9AFF", token: "bg-busy" },
@@ -94,9 +95,12 @@ export const ProjectForm = ({
     }
   };
 
-  const nameInvalid = error === "nama tidak boleh kosong" || error === "nama terlalu panjang";
-  const pathInvalid = error === "path harus absolut" || error === "folder tidak ditemukan" || error === "project dengan folder ini sudah ada";
-  const profileInvalid = error === "profil tidak dikenal";
+  const nameInvalid = error === PROJECT_ERRORS.nameEmpty || error === PROJECT_ERRORS.nameTooLong;
+  const pathInvalid =
+    error === PROJECT_ERRORS.pathNotAbsolute ||
+    error === PROJECT_ERRORS.folderNotFound ||
+    error === PROJECT_ERRORS.folderAlreadyUsed;
+  const profileInvalid = error === PROJECT_ERRORS.profileUnknown;
 
   const canSave = draft.name.trim() !== "" && draft.path.trim() !== "" && !busy;
 

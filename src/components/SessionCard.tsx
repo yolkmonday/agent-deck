@@ -6,7 +6,7 @@ import { RecoverMenu } from "@/components/RecoverMenu";
 import { TranscriptModal } from "@/components/TranscriptModal";
 import { useT, type MessageKey } from "@/i18n";
 import { activityText } from "@/lib/activity";
-import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
+import { formatUsd, formatNotional } from "@/lib/cost";
 import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session, SubAgent } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
@@ -290,7 +290,7 @@ export const SessionCard = ({
           ) : s.billingMode === "subscription" ? (
             // A subscription's tokens cost nothing extra, so the figure is an
             // estimate at API rates and must never read like a bill.
-            <span className="text-fg-3" title={NOTIONAL_HINT}>
+            <span className="text-fg-3" title={t("cost.notionalHint")}>
               {formatNotional(s.costUsd)}
             </span>
           ) : (

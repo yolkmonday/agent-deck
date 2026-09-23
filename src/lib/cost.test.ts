@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { t } from "@/i18n";
 import type { DailyRow } from "@/lib/api";
-import { formatNotional, formatPct, formatUsd, NOTIONAL_HINT, stackByDate } from "@/lib/cost";
+import { formatNotional, formatPct, formatUsd, stackByDate } from "@/lib/cost";
 
 const usage = (input: number, output: number, cacheRead = 0, cacheWrite = 0, reasoning = 0) => ({
   input,
@@ -37,8 +38,7 @@ describe("formatNotional", () => {
     expect(formatNotional(0.004)).toBe("≈ <$0,01");
   });
   test("the tooltip says the figure does not add to the bill", () => {
-    // Resolved once at module load; the default language is always "en".
-    expect(NOTIONAL_HINT).toBe("Estimate if billed per token. Doesn't add to the bill.");
+    expect(t("cost.notionalHint")).toBe("Estimate if billed per token. Doesn't add to the bill.");
   });
 });
 

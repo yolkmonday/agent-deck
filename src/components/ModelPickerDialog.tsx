@@ -2,7 +2,7 @@ import { Search, X } from "lucide-react";
 import { useState } from "react";
 import { useT } from "@/i18n";
 import type { OcModel } from "@/lib/api";
-import { filterModels, DEFAULT_LIMITS_NOTE, toggleAll, toggleOne } from "@/lib/models";
+import { filterModels, toggleAll, toggleOne } from "@/lib/models";
 
 interface ModelPickerDialogProps {
   fetched: string[];
@@ -130,7 +130,7 @@ export const ModelPickerDialog = ({ fetched, existing, onCancel, onAdd }: ModelP
             </div>
           </div>
           <span className="text-[11px] text-fg-3">
-            {t("modelPickerDialog.limitsHint", { note: DEFAULT_LIMITS_NOTE })}
+            {t("modelPickerDialog.limitsHint", { note: t("models.defaultLimitsNote") })}
           </span>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { useT } from "@/i18n";
-import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
+import { formatUsd, formatNotional } from "@/lib/cost";
 import { formatTokens } from "@/lib/format";
 import { summarize } from "@/lib/summarize";
 import type { Session } from "@/lib/types";
@@ -45,7 +45,7 @@ export const KpiRow = ({ sessions }: { sessions: Session[] }) => {
           : ` ${t(s.unpriced === 1 ? "kpiRow.unpriced.one" : "kpiRow.unpriced.other", { n: s.unpriced })}`),
       tone: s.unpriced === 0 ? "text-fg" : "text-waiting",
       alert: "",
-      hint: notionalOnly ? NOTIONAL_HINT : "",
+      hint: notionalOnly ? t("cost.notionalHint") : "",
     },
   ];
   if (s.stalled > 0) items[0].alert = t("kpiRow.stalled", { n: s.stalled });

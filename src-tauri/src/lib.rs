@@ -597,45 +597,45 @@ struct BillingSummary {
 }
 
 /// One account as the user typed it, checked before it is written. Every failure
-/// is the exact Indonesian string the dialog displays.
+/// is the exact string the dialog displays.
 pub fn validate_account(a: &BillingAccount) -> Result<(), String> {
     if a.label.trim().is_empty() {
-        return Err("nama akun tidak boleh kosong".into());
+        return Err("account name cannot be empty".into());
     }
     if a.matches.iter().all(|m| m.trim().is_empty()) {
-        return Err("isi setidaknya satu awalan model".into());
+        return Err("enter at least one model prefix".into());
     }
     match a.mode {
         BillingMode::Subscription => {
             let monthly = a
                 .monthly_usd
-                .ok_or_else(|| "biaya bulanan wajib diisi".to_string())?;
+                .ok_or_else(|| "monthly cost is required".to_string())?;
             if monthly < 0.0 {
-                return Err("biaya bulanan tidak boleh negatif".into());
+                return Err("monthly cost cannot be negative".into());
             }
             let day = a
                 .renewal_day
-                .ok_or_else(|| "tanggal perpanjangan wajib diisi".to_string())?;
+                .ok_or_else(|| "renewal date is required".to_string())?;
             if !(1..=RENEWAL_DAY_MAX).contains(&day) {
-                return Err(format!("tanggal perpanjangan harus 1 sampai {RENEWAL_DAY_MAX}"));
+                return Err(format!("renewal date must be between 1 and {RENEWAL_DAY_MAX}"));
             }
         }
         BillingMode::Prepaid => {
             let credit = a
                 .credit_usd
-                .ok_or_else(|| "saldo awal wajib diisi".to_string())?;
+                .ok_or_else(|| "starting balance is required".to_string())?;
             if credit < 0.0 {
-                return Err("saldo awal tidak boleh negatif".into());
+                return Err("starting balance cannot be negative".into());
             }
             if a.started_on.as_deref().is_some_and(|d| parse_date_iso(d).is_none()) {
-                return Err("tanggal mulai tidak valid".into());
+                return Err("start date is invalid".into());
             }
         }
         BillingMode::Payg => {}
     }
-    for (field, value) in [("tanggal berakhir", &a.expires_on)] {
+    for (field, value) in [("expiry date", &a.expires_on)] {
         if value.as_deref().is_some_and(|d| parse_date_iso(d).is_none()) {
-            return Err(format!("{field} tidak valid"));
+            return Err(format!("{field} is invalid"));
         }
     }
     Ok(())
@@ -715,7 +715,7 @@ fn billing_summary(
     state: State<'_, Arc<AppState>>,
 ) -> Result<BillingSummary, String> {
     let today = match as_of.as_deref() {
-        Some(s) => parse_date_iso(s).ok_or_else(|| "tanggal tidak valid".to_string())?,
+        Some(s) => parse_date_iso(s).ok_or_else(|| "date is invalid".to_string())?,
         None => local_date(now_ms()),
     };
     let table = state.billing.lock().unwrap().clone();
@@ -727,7 +727,7 @@ fn billing_summary(
         let account = table.accounts().iter().find(|a| a.id == agg.account_id);
         let period = period_for(&agg, account, today);
         if period.expired {
-            warnings.push(format!("{} sudah lewat tanggal", period.label));
+            warnings.push(format!("{} is past its date", period.label));
         } else if let (Some(left), Some(a)) = (period.days_left, account) {
             if a.mode == BillingMode::Prepaid {
                 if let (Some(credit), Some(started)) = (
@@ -739,7 +739,7 @@ fn billing_summary(
                     if burn > 0.0 {
                         let runs_out = (credit / burn).floor() as i64;
                         if runs_out < left {
-                            warnings.push(format!("{} habis dalam {} hari", period.label, runs_out));
+                            warnings.push(format!("{} runs out in {} days", period.label, runs_out));
                         }
                     }
                 }
@@ -938,13 +938,13 @@ fn recover_nudge(
     if !owned {
         return Ok(RecoverResult::refused(
             "nudge",
-            "Sesi ini jalan di terminal lain, tidak bisa dikirimi tombol.".to_string(),
+            "This session is running in another terminal and cannot receive keystrokes.".to_string(),
         ));
     }
     match reg.write(&session_id, "\r") {
         Ok(()) => Ok(RecoverResult::done(
             "nudge",
-            "Enter dikirim ke sesi.".to_string(),
+            "Enter sent to the session.".to_string(),
             None,
         )),
         Err(e) => Ok(RecoverResult::refused("nudge", e.to_string())),
@@ -967,8 +967,8 @@ fn recover_kill(
         Ok(forced) => Ok(RecoverResult::done(
             "kill",
             format!(
-                "Proses {kind} di {cwd} dihentikan.{}",
-                if forced { " (terpaksa SIGKILL)" } else { "" }
+                "Process {kind} in {cwd} was stopped.{}",
+                if forced { " (forced with SIGKILL)" } else { "" }
             ),
             None,
         )),
@@ -998,7 +998,7 @@ fn recover_restart(
     match start_terminal(&app, state.inner(), &profile_id, &cwd, 80, 24) {
         Ok(session) => Ok(RecoverResult::done(
             "restart",
-            format!("Sesi baru dimulai di {cwd}. Percakapan lama tidak ikut pindah."),
+            format!("New session started in {cwd}. The old conversation did not carry over."),
             Some(session.id),
         )),
         Err(e) => Ok(RecoverResult::refused("restart", e)),
@@ -1077,13 +1077,13 @@ fn secret_migrate_inline(
     let home = home_dir();
     let key = providers::inline_key(&home, &provider_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "provider tidak punya key plaintext di config".to_string())?;
+        .ok_or_else(|| "provider has no plaintext key in the config".to_string())?;
 
     secrets::write_key(&home, &provider_id, &key).map_err(|e| e.to_string())?;
 
     let mut file = config::ConfigFile::load(
         &providers::config_path(&home)
-            .ok_or_else(|| "config opencode tidak ditemukan".to_string())?,
+            .ok_or_else(|| "opencode config not found".to_string())?,
     )
     .map_err(|e| e.to_string())?;
     let reference = secrets::file_ref(&home, &provider_id);
@@ -1104,7 +1104,7 @@ fn secret_migrate_inline(
             .and_then(|o| o.get("headers"))
             .and_then(|h| h.as_object())
             .and_then(|h| h.keys().next().cloned())
-            .ok_or_else(|| "provider tidak punya header atau apiKey".to_string())?;
+            .ok_or_else(|| "provider has no header or apiKey".to_string())?;
         let mut path = base.to_vec();
         path.push("headers");
         path.push(name.as_str());
@@ -1171,12 +1171,12 @@ fn config_restore(path: String, state: State<'_, Arc<AppState>>) -> Result<(), S
     let _ = &state;
     let home = home_dir();
     let target = providers::config_path(&home)
-        .ok_or_else(|| "config opencode tidak ditemukan".to_string())?;
+        .ok_or_else(|| "opencode config not found".to_string())?;
     // Only a backup inside the config's own directory may be restored.
     let backup = std::path::PathBuf::from(&path);
     let expected_dir = config::backup_dir(&home);
     if backup.parent() != Some(expected_dir.as_path()) {
-        return Err("path backup tidak dikenal".to_string());
+        return Err("unrecognised backup path".to_string());
     }
     config::restore(&backup, &target).map_err(|e| e.to_string())
 }
@@ -1190,7 +1190,7 @@ const SETTING_TRUE: &str = "1";
 
 pub const DEFAULT_STALL_MINUTES: i64 = 5;
 pub const DEFAULT_SLOW_TOOL_MINUTES: i64 = 10;
-const MINUTES_ERROR: &str = "menit harus minimal 1";
+const MINUTES_ERROR: &str = "minutes must be at least 1";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -1247,7 +1247,7 @@ fn settings_read(store: &Store) -> Result<Settings, String> {
 
 fn settings_write(store: &mut Store, settings: &Settings) -> Result<Settings, String> {
     if !ATTENTION_MODES.contains(&settings.attention_mode.as_str()) {
-        return Err("mode tidak dikenal".into());
+        return Err("unknown mode".into());
     }
     if settings.stall_minutes < 1 || settings.slow_tool_minutes < 1 {
         return Err(MINUTES_ERROR.into());
@@ -1298,7 +1298,7 @@ fn window_focused(window: tauri::Window) -> bool {
 }
 
 /// The six project commands, all of them `Result<T, String>` so a validation
-/// failure travels to the UI as the exact Indonesian string it must display.
+/// failure travels to the UI as the exact string it must display.
 
 #[tauri::command]
 fn projects_list(state: State<'_, Arc<AppState>>) -> Result<Vec<projects::Project>, String> {
@@ -1367,7 +1367,7 @@ fn project_update(
     let previous = existing
         .iter()
         .find(|r| r.id == id)
-        .ok_or_else(|| "project tidak ditemukan".to_string())?
+        .ok_or_else(|| "project not found".to_string())?
         .clone();
     let path = validate_project(&input, &existing, Some(&id))?;
     let row = collector::store::ProjectRow {
@@ -1405,7 +1405,7 @@ fn project_touch(id: String, state: State<'_, Arc<AppState>>) -> Result<projects
         .map_err(|e| e.to_string())?
         .into_iter()
         .find(|r| r.id == id)
-        .ok_or_else(|| "project tidak ditemukan".to_string())?;
+        .ok_or_else(|| "project not found".to_string())?;
     Ok(projects::to_project(row))
 }
 
@@ -1740,7 +1740,7 @@ mod tests {
         };
         assert_eq!(
             settings_write(&mut store, &bad),
-            Err("mode tidak dikenal".to_string())
+            Err("unknown mode".to_string())
         );
         assert_eq!(settings_read(&store).unwrap().attention_mode, "notify");
         assert_eq!(store.setting("attention_mode").unwrap(), None);
@@ -1787,12 +1787,12 @@ mod tests {
         let bad = Settings { stall_minutes: 0, ..Settings::default() };
         assert_eq!(
             settings_write(&mut store, &bad),
-            Err("menit harus minimal 1".to_string())
+            Err("minutes must be at least 1".to_string())
         );
         let bad = Settings { slow_tool_minutes: 0, ..Settings::default() };
         assert_eq!(
             settings_write(&mut store, &bad),
-            Err("menit harus minimal 1".to_string())
+            Err("minutes must be at least 1".to_string())
         );
     }
 
@@ -1834,7 +1834,7 @@ mod tests {
     fn billing_rejects_an_empty_label() {
         let mut a = billing_account(BillingMode::Subscription);
         a.label = "   ".into();
-        assert_eq!(validate_account(&a), Err("nama akun tidak boleh kosong".into()));
+        assert_eq!(validate_account(&a), Err("account name cannot be empty".into()));
     }
 
     #[test]
@@ -1843,7 +1843,7 @@ mod tests {
         a.matches = vec!["".into(), " ".into()];
         assert_eq!(
             validate_account(&a),
-            Err("isi setidaknya satu awalan model".into())
+            Err("enter at least one model prefix".into())
         );
     }
 
@@ -1854,7 +1854,7 @@ mod tests {
             a.renewal_day = Some(day);
             assert_eq!(
                 validate_account(&a),
-                Err("tanggal perpanjangan harus 1 sampai 28".into()),
+                Err("renewal date must be between 1 and 28".into()),
                 "day {day}"
             );
         }
@@ -1864,32 +1864,32 @@ mod tests {
     fn billing_rejects_a_negative_monthly_price() {
         let mut a = billing_account(BillingMode::Subscription);
         a.monthly_usd = Some(-1.0);
-        assert_eq!(validate_account(&a), Err("biaya bulanan tidak boleh negatif".into()));
+        assert_eq!(validate_account(&a), Err("monthly cost cannot be negative".into()));
     }
 
     #[test]
     fn billing_rejects_a_malformed_date() {
         let mut a = billing_account(BillingMode::Subscription);
         a.expires_on = Some("14-03-2026".into());
-        assert_eq!(validate_account(&a), Err("tanggal berakhir tidak valid".into()));
+        assert_eq!(validate_account(&a), Err("expiry date is invalid".into()));
 
         let mut p = billing_account(BillingMode::Prepaid);
         p.started_on = Some("kemarin".into());
-        assert_eq!(validate_account(&p), Err("tanggal mulai tidak valid".into()));
+        assert_eq!(validate_account(&p), Err("start date is invalid".into()));
     }
 
     #[test]
     fn billing_requires_the_fields_its_mode_needs() {
         let mut sub = billing_account(BillingMode::Subscription);
         sub.monthly_usd = None;
-        assert_eq!(validate_account(&sub), Err("biaya bulanan wajib diisi".into()));
+        assert_eq!(validate_account(&sub), Err("monthly cost is required".into()));
         sub.monthly_usd = Some(200.0);
         sub.renewal_day = None;
-        assert_eq!(validate_account(&sub), Err("tanggal perpanjangan wajib diisi".into()));
+        assert_eq!(validate_account(&sub), Err("renewal date is required".into()));
 
         let mut pre = billing_account(BillingMode::Prepaid);
         pre.credit_usd = None;
-        assert_eq!(validate_account(&pre), Err("saldo awal wajib diisi".into()));
+        assert_eq!(validate_account(&pre), Err("starting balance is required".into()));
     }
 
     #[test]
