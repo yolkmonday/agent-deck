@@ -16,7 +16,8 @@ export type UpdaterEvent =
   | { type: "none" }
   | { type: "failed"; error: string }
   | { type: "progress"; progress: number }
-  | { type: "dismiss" };
+  | { type: "dismiss" }
+  | { type: "install-failed"; error: string };
 
 export const initialUpdaterState: UpdaterState = {
   status: "idle",
@@ -42,6 +43,8 @@ export const reduce = (s: UpdaterState, e: UpdaterEvent): UpdaterState => {
       return { ...s, status: "downloading", progress: Math.min(1, Math.max(0, e.progress)) };
     case "dismiss":
       return { ...s, dismissed: s.version };
+    case "install-failed":
+      return { ...s, status: "error", manual: true, error: e.error };
   }
 };
 
@@ -78,7 +81,7 @@ export const useUpdater = create<
         await pending.install((p) => dispatch({ type: "progress", progress: p }));
         await restartApp();
       } catch (err) {
-        set({ ...get(), status: "error", manual: true, error: err instanceof Error ? err.message : String(err) });
+        dispatch({ type: "install-failed", error: err instanceof Error ? err.message : String(err) });
       }
     },
     dismiss: () => dispatch({ type: "dismiss" }),

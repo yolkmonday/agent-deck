@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useT } from "@/i18n";
 import { currentVersion } from "@/lib/updater";
 import { useUpdater } from "@/store/updater";
 
 export const UpdateSection = () => {
   const t = useT();
-  const { status, version, error, manual, check, install } = useUpdater();
+  const { status, version, error, manual, check, install } = useUpdater(
+    useShallow((s) => ({
+      status: s.status,
+      version: s.version,
+      error: s.error,
+      manual: s.manual,
+      check: s.check,
+      install: s.install,
+    })),
+  );
   const [current, setCurrent] = useState<string | null>(null);
 
   useEffect(() => {

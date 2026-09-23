@@ -45,4 +45,12 @@ describe("updater reducer", () => {
     s = reduce(s, { type: "check", manual: false });
     expect(s.status).toBe("downloading");
   });
+  test("install-failed from downloading shows the error and hides the banner", () => {
+    let s = reduce(reduce(s0, { type: "found", version: "0.3.1" }), { type: "progress", progress: 0.4 });
+    s = reduce(s, { type: "install-failed", error: "disk full" });
+    expect(s.status).toBe("error");
+    expect(s.error).toBe("disk full");
+    expect(s.manual).toBe(true);
+    expect(bannerVisible(s)).toBe(false);
+  });
 });
