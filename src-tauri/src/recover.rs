@@ -27,11 +27,11 @@ pub fn agent_kind(cmd: &str) -> Option<&'static str> {
     }
 }
 
-/// The agent kind behind a pid right now, or the Indonesian reason it must not
-/// be touched. Both failures are refusals the UI shows as information.
+/// The agent kind behind a pid right now, or the reason it must not be
+/// touched. Both failures are refusals the UI shows as information.
 pub fn verify(pid: u32, procs: &dyn ProcessTable) -> Result<String, String> {
     if !procs.is_alive(pid) {
-        return Err("proses sudah tidak ada".into());
+        return Err("process no longer exists".into());
     }
     let command = procs
         .list()
@@ -40,7 +40,7 @@ pub fn verify(pid: u32, procs: &dyn ProcessTable) -> Result<String, String> {
         .map(|p| p.command);
     match command.as_deref().and_then(agent_kind) {
         Some(kind) => Ok(kind.to_string()),
-        None => Err("pid sudah bukan proses agent".into()),
+        None => Err("pid is no longer an agent process".into()),
     }
 }
 
@@ -53,7 +53,7 @@ pub fn verify(pid: u32, procs: &dyn ProcessTable) -> Result<String, String> {
 #[cfg(unix)]
 pub fn terminate(pid: u32, procs: &dyn ProcessTable, wait_ms: u64) -> Result<bool, String> {
     if pid <= 1 || pid == std::process::id() {
-        return Err("pid tidak boleh dimatikan".into());
+        return Err("pid must not be killed".into());
     }
     if !signal(pid, libc::SIGTERM)? {
         return Ok(false);
@@ -68,7 +68,7 @@ pub fn terminate(pid: u32, procs: &dyn ProcessTable, wait_ms: u64) -> Result<boo
 /// path yet, so the action simply refuses.
 #[cfg(not(unix))]
 pub fn terminate(_pid: u32, _procs: &dyn ProcessTable, _wait_ms: u64) -> Result<bool, String> {
-    Err("menghentikan proses tidak didukung di platform ini".into())
+    Err("terminating processes is not supported on this platform".into())
 }
 
 /// `Ok(false)` means the pid was already gone, which is the outcome the caller
@@ -83,7 +83,7 @@ fn signal(pid: u32, sig: libc::c_int) -> Result<bool, String> {
     if err.raw_os_error() == Some(libc::ESRCH) {
         return Ok(false);
     }
-    Err(format!("gagal mengirim sinyal ke pid {pid}: {err}"))
+    Err(format!("failed to send signal to pid {pid}: {err}"))
 }
 
 fn wait_for_exit(pid: u32, procs: &dyn ProcessTable, wait_ms: u64) -> bool {
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn verify_rejects_a_dead_pid() {
         let procs = table(&[], &[]);
-        assert_eq!(verify(4242, &procs), Err("proses sudah tidak ada".to_string()));
+        assert_eq!(verify(4242, &procs), Err("process no longer exists".to_string()));
     }
 
     #[test]
@@ -183,7 +183,7 @@ mod tests {
         let procs = table(&[7], &[(7, "/usr/bin/vim")]);
         assert_eq!(
             verify(7, &procs),
-            Err("pid sudah bukan proses agent".to_string())
+            Err("pid is no longer an agent process".to_string())
         );
     }
 
@@ -199,7 +199,7 @@ mod tests {
         for pid in [0, 1, std::process::id()] {
             assert_eq!(
                 terminate(pid, &procs, 10),
-                Err("pid tidak boleh dimatikan".to_string()),
+                Err("pid must not be killed".to_string()),
                 "pid {pid} was not refused"
             );
         }

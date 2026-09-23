@@ -7,6 +7,16 @@ pub const PROFILE_IDS: [&str; 3] = ["claude", "opencode", "codex"];
 pub const MAX_NAME_LEN: usize = 60;
 const SUGGESTION_LIMIT: usize = 30;
 
+/// User-facing validation error strings. Mirrored character-for-character in
+/// `src/lib/project-errors.ts`, which `ProjectForm.tsx` uses to match on
+/// `error` and highlight the offending field. Keep both sides in sync.
+pub const ERR_NAME_EMPTY: &str = "name cannot be empty";
+pub const ERR_NAME_TOO_LONG: &str = "name is too long";
+pub const ERR_PATH_NOT_ABSOLUTE: &str = "path must be absolute";
+pub const ERR_FOLDER_NOT_FOUND: &str = "folder not found";
+pub const ERR_FOLDER_ALREADY_USED: &str = "a project with this folder already exists";
+pub const ERR_PROFILE_UNKNOWN: &str = "unknown profile";
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectInput {
@@ -61,7 +71,7 @@ pub fn display_name(path: &str, home: &str) -> String {
         .to_string()
 }
 
-/// Returns the normalised path, or the exact Indonesian error the UI shows.
+/// Returns the normalised path, or the exact error the UI shows.
 /// `editing_id` is the row being updated, so it does not collide with itself.
 pub fn validate(
     input: &ProjectInput,
@@ -71,30 +81,30 @@ pub fn validate(
 ) -> Result<String, String> {
     let name = input.name.trim();
     if name.is_empty() {
-        return Err("nama tidak boleh kosong".into());
+        return Err(ERR_NAME_EMPTY.into());
     }
     if name.chars().count() > MAX_NAME_LEN {
-        return Err("nama terlalu panjang".into());
+        return Err(ERR_NAME_TOO_LONG.into());
     }
 
     let path = normalise_path(&input.path, home);
     if !path.starts_with('/') {
-        return Err("path harus absolut".into());
+        return Err(ERR_PATH_NOT_ABSOLUTE.into());
     }
     if !std::path::Path::new(&path).is_dir() {
-        return Err("folder tidak ditemukan".into());
+        return Err(ERR_FOLDER_NOT_FOUND.into());
     }
 
     let collision = existing
         .iter()
         .any(|r| r.path == path && Some(r.id.as_str()) != editing_id);
     if collision {
-        return Err("project dengan folder ini sudah ada".into());
+        return Err(ERR_FOLDER_ALREADY_USED.into());
     }
 
     if let Some(profile) = input.default_profile.as_deref() {
         if !PROFILE_IDS.contains(&profile) {
-            return Err("profil tidak dikenal".into());
+            return Err(ERR_PROFILE_UNKNOWN.into());
         }
     }
 
@@ -274,10 +284,10 @@ mod tests {
         let path = dir.to_str().unwrap();
 
         let mut blank = input("   ", path);
-        assert_eq!(validate(&blank, home, &[], None), Err("nama tidak boleh kosong".into()));
+        assert_eq!(validate(&blank, home, &[], None), Err(ERR_NAME_EMPTY.into()));
 
         blank.name = "x".repeat(61);
-        assert_eq!(validate(&blank, home, &[], None), Err("nama terlalu panjang".into()));
+        assert_eq!(validate(&blank, home, &[], None), Err(ERR_NAME_TOO_LONG.into()));
 
         blank.name = "a".repeat(60);
         assert!(validate(&blank, home, &[], None).is_ok());
@@ -289,7 +299,7 @@ mod tests {
         let home = tmp.path().to_str().unwrap();
         assert_eq!(
             validate(&input("x", "Dev/x"), home, &[], None),
-            Err("path harus absolut".into())
+            Err(ERR_PATH_NOT_ABSOLUTE.into())
         );
     }
 
@@ -300,7 +310,7 @@ mod tests {
         let missing = tmp.path().join("gone");
         assert_eq!(
             validate(&input("x", missing.to_str().unwrap()), home, &[], None),
-            Err("folder tidak ditemukan".into())
+            Err(ERR_FOLDER_NOT_FOUND.into())
         );
     }
 
@@ -312,7 +322,7 @@ mod tests {
         std::fs::write(&file, "x").unwrap();
         assert_eq!(
             validate(&input("x", file.to_str().unwrap()), home, &[], None),
-            Err("folder tidak ditemukan".into())
+            Err(ERR_FOLDER_NOT_FOUND.into())
         );
     }
 
@@ -327,13 +337,13 @@ mod tests {
         let rows = vec![existing("other", path)];
         assert_eq!(
             validate(&input("x", path), home, &rows, None),
-            Err("project dengan folder ini sudah ada".into())
+            Err(ERR_FOLDER_ALREADY_USED.into())
         );
         // Trailing slash and a tilde-free spelling normalise to the same path.
         let sloppy = format!("{path}//");
         assert_eq!(
             validate(&input("x", &sloppy), home, &rows, None),
-            Err("project dengan folder ini sudah ada".into())
+            Err(ERR_FOLDER_ALREADY_USED.into())
         );
     }
 
@@ -349,7 +359,7 @@ mod tests {
         assert_eq!(validate(&input("x", path), home, &rows, Some("mine")), Ok(path.to_string()));
         assert_eq!(
             validate(&input("x", path), home, &rows, Some("other")),
-            Err("project dengan folder ini sudah ada".into())
+            Err(ERR_FOLDER_ALREADY_USED.into())
         );
     }
 
@@ -362,7 +372,7 @@ mod tests {
 
         let mut bad = input("x", path);
         bad.default_profile = Some("emacs".into());
-        assert_eq!(validate(&bad, home, &[], None), Err("profil tidak dikenal".into()));
+        assert_eq!(validate(&bad, home, &[], None), Err(ERR_PROFILE_UNKNOWN.into()));
 
         let mut good = input("x", path);
         good.default_profile = Some("claude".into());

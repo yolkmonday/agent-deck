@@ -1,14 +1,9 @@
-import { t } from "@/i18n";
 import type { OcModel } from "@/lib/api";
 
 export interface LimitPair {
   context: number;
   output: number;
 }
-
-// Resolved once at module load; language switches take effect after reload
-// since consumers use this as a plain string constant, not a t() call.
-export const DEFAULT_LIMITS_NOTE = t("models.defaultLimitsNote");
 
 const LIMIT_RULES: { match: string[]; limits: LimitPair }[] = [
   { match: ["claude"], limits: { context: 200000, output: 64000 } },

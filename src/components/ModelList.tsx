@@ -8,7 +8,6 @@ import { modelTest, modelsFetch } from "@/lib/api";
 import {
   applyDefaultLimits,
   applyLimits,
-  DEFAULT_LIMITS_NOTE,
   filterModels,
   incompleteModels,
   mergeFetched,
@@ -280,7 +279,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
             >
               {t("modelList.clearSelection")}
             </button>
-            <span className="text-[11px] text-fg-3">{DEFAULT_LIMITS_NOTE}</span>
+            <span className="text-[11px] text-fg-3">{t("models.defaultLimitsNote")}</span>
           </div>
           <span className="text-[11px] text-fg-3">{t("modelList.deleteConfigOnly")}</span>
           {settingLimits && (

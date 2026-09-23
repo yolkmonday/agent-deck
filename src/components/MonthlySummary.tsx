@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Icon } from "@iconify/react";
 import { useT, type MessageKey } from "@/i18n";
 import { billingSummary, type AccountPeriod } from "@/lib/api";
-import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
+import { formatUsd, formatNotional } from "@/lib/cost";
 import { formatTokens, totalTokens } from "@/lib/format";
 import type { BillingMode } from "@/lib/types";
 
@@ -49,7 +49,7 @@ const Figure = ({ p }: { p: AccountPeriod }) => {
                 n: p.daysLeft,
               })}
         </span>
-        <span className="font-mono text-[11.5px] text-fg-3" title={NOTIONAL_HINT}>
+        <span className="font-mono text-[11.5px] text-fg-3" title={t("cost.notionalHint")}>
           {t("monthlySummary.apiEquivalent", { value: formatNotional(p.notionalUsd) })}
         </span>
       </span>

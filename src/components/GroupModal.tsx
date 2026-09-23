@@ -4,7 +4,7 @@ import { AgentIcon } from "@/components/BrandIcon";
 import { TranscriptModal } from "@/components/TranscriptModal";
 import { useT, type MessageKey } from "@/i18n";
 import { activityText } from "@/lib/activity";
-import { formatNotional, formatUsd, NOTIONAL_HINT } from "@/lib/cost";
+import { formatNotional, formatUsd } from "@/lib/cost";
 import { formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session } from "@/lib/types";
 
@@ -118,7 +118,7 @@ const Row = ({
           -
         </span>
       ) : s.billingMode === "subscription" ? (
-        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-3" title={NOTIONAL_HINT}>
+        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-3" title={t("cost.notionalHint")}>
           {formatNotional(s.costUsd)}
         </span>
       ) : (
