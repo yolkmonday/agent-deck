@@ -15,6 +15,26 @@ export interface DailyRow {
   costUsd: number;
 }
 
+export type PerfRange = "24h" | "7d" | "30d";
+
+export interface DailyTps {
+  day: string;
+  tpsP50: number;
+}
+
+export interface PerfAgg {
+  key: string;
+  agent: Agent;
+  models: string[];
+  samples: number;
+  tpsP50: number;
+  tpsP10: number;
+  ttftP50Ms: number | null;
+  precise: boolean;
+  daily: DailyTps[];
+  children: PerfAgg[];
+}
+
 export interface ModelRow {
   model: string;
   agent: Agent;
@@ -307,6 +327,8 @@ export const indexStatus = () => invoke<IndexStatus>("index_status");
 export const reindex = () => invoke<IndexStatus>("reindex");
 export const historyDaily = (days: number) => invoke<DailyRow[]>("history_daily", { days });
 export const historyByModel = (days: number) => invoke<ModelRow[]>("history_by_model", { days });
+export const perfByModel = (range: PerfRange, groupByFamily: boolean) =>
+  invoke<PerfAgg[]>("perf_by_model", { range, groupByFamily });
 export const historyByProject = (days: number) => invoke<ProjectRow[]>("history_by_project", { days });
 export const historyTotals = (days: number) => invoke<Totals>("history_totals", { days });
 export const pricingGet = () => invoke<PriceEntry[]>("pricing_get");

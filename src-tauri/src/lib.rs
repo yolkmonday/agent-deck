@@ -477,6 +477,26 @@ fn history_by_model(days: i64, state: State<'_, Arc<AppState>>) -> Result<Vec<Mo
 }
 
 #[tauri::command]
+fn perf_by_model(
+    range: String,
+    group_by_family: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<collector::perf::PerfAgg>, String> {
+    let days = match range.as_str() {
+        "24h" => 1,
+        "30d" => 30,
+        _ => 7,
+    };
+    let rows = state
+        .store
+        .lock()
+        .unwrap()
+        .perf_samples(since_ms(days))
+        .map_err(|e| e.to_string())?;
+    Ok(collector::perf::aggregate(&rows, group_by_family))
+}
+
+#[tauri::command]
 fn history_by_project(days: i64, state: State<'_, Arc<AppState>>) -> Result<Vec<ProjectRow>, String> {
     let since = since_ms(days);
     let store = state.store.lock().unwrap();
@@ -1989,6 +2009,7 @@ pub fn run() {
             reindex,
             history_daily,
             history_by_model,
+            perf_by_model,
             history_by_project,
             history_totals,
             timeline_spans,
