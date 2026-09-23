@@ -3,10 +3,12 @@ import { Plus } from "lucide-react";
 import { AgentIcon, ModelIcon } from "@/components/BrandIcon";
 import { ModelChips } from "@/components/ModelChips";
 import { ProviderTable } from "@/components/ProviderTable";
+import { useT } from "@/i18n";
 import { modelsOverview } from "@/lib/api";
 import { useNavigate } from "@/lib/nav";
 
 export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
+  const t = useT();
   const open = useNavigate();
   const query = useQuery({ queryKey: ["models-overview"], queryFn: modelsOverview });
 
@@ -14,10 +16,8 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
         <div className="flex flex-col gap-0.75">
-          <h1 className="text-[22px] font-semibold">Model &amp; Provider</h1>
-          <span className="text-[12.5px] text-fg-2">
-            Model tiap agent dan provider opencode yang terpasang. Klik provider untuk mengelola.
-          </span>
+          <h1 className="text-[22px] font-semibold">{t("providerOverviewPage.title")}</h1>
+          <span className="text-[12.5px] text-fg-2">{t("providerOverviewPage.subtitle")}</span>
         </div>
         <button
           type="button"
@@ -25,7 +25,7 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
           className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md bg-busy px-3.5 py-2 text-[13px] font-semibold text-bg hover:opacity-90"
         >
           <Plus size={15} />
-          Provider baru
+          {t("providerOverviewPage.newProvider")}
         </button>
       </header>
 
@@ -37,7 +37,9 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
         )}
 
         {query.isPending && (
-          <div className="flex h-64 items-center justify-center text-sm text-fg-3">Memuat provider…</div>
+          <div className="flex h-64 items-center justify-center text-sm text-fg-3">
+            {t("providerOverviewPage.loading")}
+          </div>
         )}
 
         {query.data && (
@@ -61,9 +63,7 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
                   <AgentIcon agent="opencode" size={16} className="text-opencode" />
                   <span className="text-sm font-semibold">opencode</span>
                 </div>
-                <span className="text-xs text-fg-3">
-                  Config global. Config project ditampilkan tapi belum bisa diedit.
-                </span>
+                <span className="text-xs text-fg-3">{t("providerOverviewPage.opencodeNote")}</span>
               </div>
               <div className="rounded-[10px] border border-border bg-surface px-5 py-4">
                 <ProviderTable providers={query.data.opencode} onOpen={open.provider} />
@@ -77,7 +77,7 @@ export const ProviderOverviewPage = ({ onNew }: { onNew: () => void }) => {
               </div>
               <div className="flex flex-col gap-2 rounded-[10px] border border-border bg-surface px-5 py-4">
                 {query.data.codex.models.length === 0 ? (
-                  <span className="text-xs text-fg-3">Belum ada model Codex di riwayat.</span>
+                  <span className="text-xs text-fg-3">{t("providerOverviewPage.noCodexModels")}</span>
                 ) : (
                   <div className="flex flex-wrap gap-1.5">
                     {query.data.codex.models.map((m) => (
