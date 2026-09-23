@@ -2,6 +2,7 @@ import { useState } from "react";
 import { GroupModal } from "@/components/GroupModal";
 import { KpiRow } from "@/components/KpiRow";
 import { SessionCard } from "@/components/SessionCard";
+import { useT } from "@/i18n";
 import { groupCards } from "@/lib/grouping";
 import { useLive } from "@/store/live";
 
@@ -14,6 +15,7 @@ export const LivePage = ({
   highlightSessionId?: string | null;
   onHighlightDone?: () => void;
 }) => {
+  const t = useT();
   const snapshot = useLive((s) => s.snapshot);
   const sessions = snapshot?.sessions ?? [];
   const nowMs = snapshot?.generatedAtMs ?? Date.now();
@@ -25,11 +27,17 @@ export const LivePage = ({
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
         <div className="flex flex-col gap-0.75">
-          <h1 className="text-[22px] font-semibold">Live</h1>
+          <h1 className="text-[22px] font-semibold">{t("livePage.title")}</h1>
           <span className="flex items-center gap-2 text-[12.5px] text-fg-2">
             <span className="size-1.75 rounded-full bg-ok" />
-            {sessions.length} sesi aktif
-            {cards.length !== sessions.length && <span className="text-fg-3">· {cards.length} project</span>}
+            {t(sessions.length === 1 ? "livePage.activeSessions.one" : "livePage.activeSessions.other", {
+              n: sessions.length,
+            })}
+            {cards.length !== sessions.length && (
+              <span className="text-fg-3">
+                · {t(cards.length === 1 ? "livePage.projectCount.one" : "livePage.projectCount.other", { n: cards.length })}
+              </span>
+            )}
           </span>
         </div>
       </header>
@@ -42,12 +50,12 @@ export const LivePage = ({
             </div>
           ))}
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold">Sesi berjalan</span>
-            <span className="text-xs text-fg-3">Urut: butuh input dulu, lalu paling lama jalan</span>
+            <span className="text-sm font-semibold">{t("livePage.runningSessions")}</span>
+            <span className="text-xs text-fg-3">{t("livePage.sortHint")}</span>
           </div>
           {sessions.length === 0 ? (
             <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-fg-3">
-              Belum ada agent yang berjalan. Buka claude atau opencode di terminal.
+              {t("livePage.empty")}
             </div>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] items-stretch gap-4">

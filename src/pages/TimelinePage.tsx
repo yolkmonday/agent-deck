@@ -3,15 +3,21 @@ import { useState } from "react";
 import { RangeFilter } from "@/components/RangeFilter";
 import { SpanDetail } from "@/components/SpanDetail";
 import { TimelineLane } from "@/components/TimelineLane";
+import { useT } from "@/i18n";
 import { timelineSpans } from "@/lib/api";
 import type { TimelineSpan } from "@/lib/api";
 import { ticksFor, windowFor } from "@/lib/timeline";
 
 const RANGE_MINUTES = [30, 120, 1440];
-const RANGE_LABELS: Record<number, string> = { 30: "30 mnt", 120: "2 jam", 1440: "Hari ini" };
 const TICK_COUNT = 6;
 
 export const TimelinePage = () => {
+  const t = useT();
+  const RANGE_LABELS: Record<number, string> = {
+    30: t("timelinePage.range30"),
+    120: t("timelinePage.range120"),
+    1440: t("timelinePage.range1440"),
+  };
   const [minutes, setMinutes] = useState(30);
   const [selected, setSelected] = useState<TimelineSpan | null>(null);
   const nowMs = Date.now();
@@ -29,8 +35,8 @@ export const TimelinePage = () => {
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
         <div className="flex flex-col gap-0.75">
-          <h1 className="text-[22px] font-semibold">Timeline</h1>
-          <span className="text-[12.5px] text-fg-2">Satu lane per sesi, satu blok per panggilan tool</span>
+          <h1 className="text-[22px] font-semibold">{t("timelinePage.title")}</h1>
+          <span className="text-[12.5px] text-fg-2">{t("timelinePage.subtitle")}</span>
         </div>
         <RangeFilter value={minutes} onChange={setMinutes} options={RANGE_MINUTES} labels={RANGE_LABELS} />
       </header>
@@ -42,11 +48,13 @@ export const TimelinePage = () => {
             </div>
           )}
 
-          {isPending && <div className="flex h-64 items-center justify-center text-sm text-fg-3">Memuat data…</div>}
+          {isPending && (
+            <div className="flex h-64 items-center justify-center text-sm text-fg-3">{t("timelinePage.loading")}</div>
+          )}
 
           {empty && (
             <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-fg-3">
-              Belum ada aktivitas tool pada rentang ini.
+              {t("timelinePage.empty")}
             </div>
           )}
 
