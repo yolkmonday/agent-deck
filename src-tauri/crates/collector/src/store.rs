@@ -172,7 +172,7 @@ pub struct AccountAgg {
 /// These are paid per token by default, exactly as before billing existed.
 pub const UNMATCHED_LABEL: &str = "Tanpa akun";
 
-fn agent_str(a: Agent) -> &'static str {
+pub(crate) fn agent_str(a: Agent) -> &'static str {
     match a {
         Agent::Claude => "claude",
         Agent::Opencode => "opencode",

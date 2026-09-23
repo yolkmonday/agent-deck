@@ -67,7 +67,7 @@ const Row = ({
             </button>
           )}
           <AgentIcon agent={row.agent} size={14} />
-          {row.key}
+          {row.label}
         </span>
       </td>
       <td className="py-3 text-right font-mono text-[12.5px] font-semibold text-fg" title={!row.precise ? ESTIMATE_HINT : undefined}>

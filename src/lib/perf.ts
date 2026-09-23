@@ -29,7 +29,7 @@ export const sortPerf = (rows: PerfAgg[], key: PerfSortKey, desc: boolean): Perf
     .map(({ r }) => r);
 
 const matches = (r: PerfAgg, q: string): boolean =>
-  r.key.toLowerCase().includes(q) ||
+  r.label.toLowerCase().includes(q) ||
   r.models.some((m) => m.toLowerCase().includes(q)) ||
   r.children.some((c) => matches(c, q));
 
@@ -41,7 +41,7 @@ export const filterPerf = (rows: PerfAgg[], q: string): PerfAgg[] => {
 // Flatten one level (top-level rows + their direct children) so a key can be matched
 // whether it belongs to a family row or one of its children in grouped mode. A key
 // present at both levels keeps the first occurrence (top-level rows are visited first).
-const flattenOneLevel = (rows: PerfAgg[]): Map<string, PerfAgg> => {
+export const flattenOneLevel = (rows: PerfAgg[]): Map<string, PerfAgg> => {
   const byKey = new Map<string, PerfAgg>();
   for (const r of rows) {
     if (!byKey.has(r.key)) byKey.set(r.key, r);

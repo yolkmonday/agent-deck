@@ -57,7 +57,11 @@ pub struct DailyTps {
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PerfAgg {
+    /// Unique across model and family rows: `fam:{family}` for a family row,
+    /// `{agent}:{model}` for a model row. Never shown to the user directly.
     pub key: String,
+    /// Display text: the family name, or the raw model string.
+    pub label: String,
     pub agent: Agent,
     pub models: Vec<String>,
     pub samples: usize,
@@ -91,7 +95,25 @@ fn sorted_tps(rows: &[&PerfRow]) -> Vec<f64> {
     v
 }
 
-fn build(key: String, rows: &[&PerfRow]) -> PerfAgg {
+/// The agent with the most samples in `rows`. Ties resolve to the
+/// alphabetically-last agent string (stable, not arbitrary); a single-agent
+/// group trivially returns that agent.
+fn dominant_agent(rows: &[&PerfRow]) -> Agent {
+    let mut counts: BTreeMap<&'static str, (Agent, usize)> = BTreeMap::new();
+    for r in rows {
+        let entry = counts
+            .entry(crate::store::agent_str(r.agent))
+            .or_insert((r.agent, 0));
+        entry.1 += 1;
+    }
+    counts
+        .into_values()
+        .max_by_key(|(_, n)| *n)
+        .map(|(a, _)| a)
+        .unwrap_or(rows[0].agent)
+}
+
+fn build(key: String, label: String, rows: &[&PerfRow]) -> PerfAgg {
     let all = sorted_tps(rows);
     let mut ttft: Vec<i64> = rows.iter().filter_map(|r| r.ttft_ms).collect();
     ttft.sort_unstable();
@@ -117,7 +139,8 @@ fn build(key: String, rows: &[&PerfRow]) -> PerfAgg {
     models.dedup();
     PerfAgg {
         key,
-        agent: rows[0].agent,
+        label,
+        agent: dominant_agent(rows),
         models,
         samples: rows.len(),
         tps_p50: percentile(&all, 50.0),
@@ -130,16 +153,18 @@ fn build(key: String, rows: &[&PerfRow]) -> PerfAgg {
 }
 
 fn by_model(rows: &[&PerfRow]) -> Vec<PerfAgg> {
+    // Keyed by (agent, model) so the same model string under different agents
+    // never collides; `key` below reuses that pair, lowercase agent first.
     let mut groups: BTreeMap<(String, String), Vec<&PerfRow>> = BTreeMap::new();
     for r in rows {
         groups
-            .entry((format!("{:?}", r.agent), r.model.clone()))
+            .entry((crate::store::agent_str(r.agent).to_string(), r.model.clone()))
             .or_default()
             .push(r);
     }
     let mut out: Vec<PerfAgg> = groups
         .into_iter()
-        .map(|((_, m), rs)| build(m, &rs))
+        .map(|((agent, m), rs)| build(format!("{agent}:{m}"), m, &rs))
         .collect();
     out.sort_by(|a, b| b.tps_p50.total_cmp(&a.tps_p50));
     out
@@ -157,7 +182,7 @@ pub fn aggregate(rows: &[PerfRow], group_by_family: bool) -> Vec<PerfAgg> {
     let mut out: Vec<PerfAgg> = fams
         .into_iter()
         .map(|(f, rs)| {
-            let mut agg = build(f, &rs);
+            let mut agg = build(format!("fam:{f}"), f, &rs);
             agg.children = by_model(&rs);
             agg
         })
@@ -279,11 +304,48 @@ mod tests {
             s("kn/deepseek-v4-pro", 3_000, 1_000, 12 + 20, None, true),
         ];
         let out = aggregate(&rows, true);
-        let flash = out.iter().find(|r| r.key == "deepseek-v4-1-flash").unwrap();
+        let flash = out.iter().find(|r| r.key == "fam:deepseek-v4-1-flash").unwrap();
+        assert_eq!(flash.label, "deepseek-v4-1-flash");
         assert_eq!(flash.samples, 2);
         assert_eq!(flash.children.len(), 2);
-        assert_eq!(flash.children[0].key, "kn/deepseek-v4-1-flash"); // 40 tps > 25 tps
-        assert!(out.iter().any(|r| r.key == "deepseek-v4-pro"));
+        assert_eq!(flash.children[0].key, "opencode:kn/deepseek-v4-1-flash"); // 40 tps > 25 tps
+        assert_eq!(flash.children[0].label, "kn/deepseek-v4-1-flash");
+        assert!(out.iter().any(|r| r.key == "fam:deepseek-v4-pro"));
+    }
+
+    #[test]
+    fn model_row_key_is_unique_per_agent() {
+        // A child model whose bare string equals its family name must not
+        // collide with the family row's key.
+        let rows = vec![s("claude-opus-4-8", 1_000, 1_000, 40, None, true)];
+        let out = aggregate(&rows, true);
+        assert_eq!(out[0].key, "fam:claude-opus-4-8");
+        assert_eq!(out[0].children[0].key, "opencode:claude-opus-4-8");
+        assert_ne!(out[0].key, out[0].children[0].key);
+    }
+
+    #[test]
+    fn family_agent_is_the_one_with_the_most_samples() {
+        let claude = |end: i64| PerfRow {
+            id: format!("c:{end}"),
+            agent: Agent::Claude,
+            session_id: "s".into(),
+            model: "claude-opus-4-8".into(),
+            start_ms: end - 1_000,
+            end_ms: end,
+            gen_ms: 1_000,
+            output_tokens: 40,
+            ttft_ms: None,
+            precise: true,
+        };
+        let rows = vec![
+            claude(1_000),
+            claude(2_000),
+            s("kn/claude-opus-4-8", 3_000, 1_000, 40, None, true), // 1 opencode sample
+        ];
+        let out = aggregate(&rows, true);
+        let fam = out.iter().find(|r| r.key == "fam:claude-opus-4-8").unwrap();
+        assert_eq!(fam.agent, Agent::Claude, "claude has 2 of 3 samples");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { chartSeries } from "@/lib/perf";
+import { chartSeries, flattenOneLevel } from "@/lib/perf";
 import type { PerfAgg } from "@/lib/api";
 
 const COLORS = ["var(--color-claude)", "var(--color-opencode)", "var(--color-codex)", "var(--color-ok)", "var(--color-busy)"];
@@ -12,7 +12,7 @@ const TooltipBox = ({
   label,
 }: {
   active?: boolean;
-  payload?: { dataKey?: string | number; value?: number; color?: string }[];
+  payload?: { dataKey?: string | number; name?: string; value?: number; color?: string }[];
   label?: string;
 }) => {
   if (!active || !payload?.length) return null;
@@ -22,7 +22,7 @@ const TooltipBox = ({
       {payload.map((p) => (
         <div key={String(p.dataKey)} className="flex items-center gap-2 text-[11.5px] text-fg-2">
           <span className="size-1.75 rounded-full" style={{ background: p.color }} />
-          <span className="flex-1">{String(p.dataKey)}</span>
+          <span className="flex-1">{p.name ?? String(p.dataKey)}</span>
           <span className="font-mono text-fg">{p.value?.toFixed(1)}</span>
         </div>
       ))}
@@ -32,6 +32,7 @@ const TooltipBox = ({
 
 export const PerfChart = ({ rows, keys }: { rows: PerfAgg[]; keys: string[] }) => {
   const data = chartSeries(rows, keys);
+  const byKey = flattenOneLevel(rows);
   if (data.length === 0) return <div className="flex h-64 items-center justify-center text-sm text-fg-3">Belum ada data.</div>;
 
   return (
@@ -54,7 +55,15 @@ export const PerfChart = ({ rows, keys }: { rows: PerfAgg[]; keys: string[] }) =
           />
           <Tooltip content={<TooltipBox />} cursor={{ stroke: "var(--color-border)" }} />
           {keys.map((key, i) => (
-            <Line key={key} type="monotone" dataKey={key} dot={false} strokeWidth={2} stroke={COLORS[i % COLORS.length]} />
+            <Line
+              key={key}
+              type="monotone"
+              dataKey={key}
+              name={byKey.get(key)?.label ?? key}
+              dot={false}
+              strokeWidth={2}
+              stroke={COLORS[i % COLORS.length]}
+            />
           ))}
         </LineChart>
       </ResponsiveContainer>

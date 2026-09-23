@@ -23,7 +23,10 @@ export interface DailyTps {
 }
 
 export interface PerfAgg {
+  /** Unique across model and family rows: `fam:{family}` or `{agent}:{model}`. */
   key: string;
+  /** Display text: the family name, or the raw model string. */
+  label: string;
   agent: Agent;
   models: string[];
   samples: number;

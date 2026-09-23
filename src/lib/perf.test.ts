@@ -3,7 +3,7 @@ import type { PerfAgg } from "@/lib/api";
 import { chartSeries, filterPerf, formatTps, formatTtft, sortPerf } from "@/lib/perf";
 
 const row = (key: string, tpsP50: number, ttftP50Ms: number | null, samples = 10, models = [key]): PerfAgg => ({
-  key, agent: "opencode", models, samples, tpsP50, tpsP10: tpsP50 / 2, ttftP50Ms, precise: true, daily: [], children: [],
+  key, label: key, agent: "opencode", models, samples, tpsP50, tpsP10: tpsP50 / 2, ttftP50Ms, precise: true, daily: [], children: [],
 });
 
 describe("formatTps", () => {
@@ -30,10 +30,15 @@ describe("sortPerf", () => {
 });
 
 describe("filterPerf", () => {
-  it("matches key or models case-insensitively", () => {
+  it("matches label or models case-insensitively", () => {
     const rows = [row("deepseek-v4-1-flash", 1, null, 10, ["kn/deepseek-v4-1-flash", "Sumo/deepseek-v4.1-flash:netra"]), row("gpt-5.5", 1, null)];
     expect(filterPerf(rows, "SUMO").map((r) => r.key)).toEqual(["deepseek-v4-1-flash"]);
     expect(filterPerf(rows, "").length).toBe(2);
+  });
+
+  it("matches by label even when the key carries a fam:/agent: prefix", () => {
+    const rows = [{ ...row("fam:deepseek-v4-1-flash", 1, null), label: "deepseek-v4-1-flash" }];
+    expect(filterPerf(rows, "deepseek").map((r) => r.key)).toEqual(["fam:deepseek-v4-1-flash"]);
   });
 });
 
