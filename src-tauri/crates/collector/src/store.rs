@@ -53,6 +53,19 @@ CREATE TABLE IF NOT EXISTS setting (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS response_perf (
+  id            TEXT PRIMARY KEY,
+  agent         TEXT NOT NULL,
+  session_id    TEXT NOT NULL,
+  model         TEXT NOT NULL,
+  start_ms      INTEGER NOT NULL,
+  end_ms        INTEGER NOT NULL,
+  gen_ms        INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,
+  ttft_ms       INTEGER,
+  precise       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS response_perf_end ON response_perf (end_ms);
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +77,20 @@ pub struct MessageRow {
     pub model: String,
     pub ts_ms: i64,
     pub tokens: TokenUsage,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PerfRow {
+    pub id: String,
+    pub agent: Agent,
+    pub session_id: String,
+    pub model: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub gen_ms: i64,
+    pub output_tokens: i64,
+    pub ttft_ms: Option<i64>,
+    pub precise: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,6 +282,72 @@ impl Store {
         Ok(rows.len())
     }
 
+    /// Upserts per-response performance samples. Merging keeps the earliest
+    /// `start_ms` and latest `end_ms` seen for an id; estimated (non-`precise`)
+    /// rows recompute `gen_ms` from the merged window, while precise rows (whole
+    /// opencode rewrites) keep the incoming `gen_ms` as-is.
+    pub fn upsert_perf(&mut self, rows: &[PerfRow]) -> Result<usize> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO response_perf (id, agent, session_id, model, start_ms, end_ms, gen_ms, output_tokens, ttft_ms, precise) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+                 ON CONFLICT(id) DO UPDATE SET \
+                   start_ms = MIN(response_perf.start_ms, excluded.start_ms), \
+                   end_ms = MAX(response_perf.end_ms, excluded.end_ms), \
+                   output_tokens = excluded.output_tokens, \
+                   ttft_ms = excluded.ttft_ms, \
+                   gen_ms = CASE WHEN excluded.precise = 1 THEN excluded.gen_ms \
+                                 ELSE MAX(response_perf.end_ms, excluded.end_ms) - MIN(response_perf.start_ms, excluded.start_ms) END, \
+                   model = excluded.model",
+            )?;
+            for r in rows {
+                stmt.execute(rusqlite::params![
+                    r.id,
+                    agent_str(r.agent),
+                    r.session_id,
+                    r.model,
+                    r.start_ms,
+                    r.end_ms,
+                    r.gen_ms,
+                    r.output_tokens,
+                    r.ttft_ms,
+                    r.precise as i64
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(rows.len())
+    }
+
+    /// Perf samples whose `end_ms >= since_ms`, ordered by `end_ms`.
+    pub fn perf_samples(&self, since_ms: i64) -> Result<Vec<PerfRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, agent, session_id, model, start_ms, end_ms, gen_ms, output_tokens, ttft_ms, precise \
+             FROM response_perf WHERE end_ms >= ?1 ORDER BY end_ms",
+        )?;
+        let rows = stmt
+            .query_map([since_ms], |r| {
+                Ok(PerfRow {
+                    id: r.get(0)?,
+                    agent: agent_from_str(&r.get::<_, String>(1)?),
+                    session_id: r.get(2)?,
+                    model: r.get(3)?,
+                    start_ms: r.get(4)?,
+                    end_ms: r.get(5)?,
+                    gen_ms: r.get(6)?,
+                    output_tokens: r.get(7)?,
+                    ttft_ms: r.get(8)?,
+                    precise: r.get::<_, i64>(9)? == 1,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     fn span_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SpanRow> {
         // All five token columns are written together, so any non-null one means
         // the span carries usage; a span without usage stores five NULLs.
@@ -338,6 +431,10 @@ impl Store {
     pub fn delete_session(&mut self, agent: Agent, session_id: &str) -> Result<usize> {
         let n = self.conn.execute(
             "DELETE FROM message WHERE agent = ?1 AND session_id = ?2",
+            rusqlite::params![agent_str(agent), session_id],
+        )?;
+        self.conn.execute(
+            "DELETE FROM response_perf WHERE agent = ?1 AND session_id = ?2",
             rusqlite::params![agent_str(agent), session_id],
         )?;
         Ok(n)
@@ -942,6 +1039,63 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
         (tmp, store)
+    }
+
+    fn test_store() -> Store {
+        Store::open(&tempfile::tempdir().unwrap().into_path().join("t.db")).unwrap()
+    }
+
+    fn perf(id: &str, start: i64, end: i64, gen: i64, out: i64) -> PerfRow {
+        PerfRow {
+            id: id.into(),
+            agent: Agent::Claude,
+            session_id: "s1".into(),
+            model: "claude-opus-4-8".into(),
+            start_ms: start,
+            end_ms: end,
+            gen_ms: gen,
+            output_tokens: out,
+            ttft_ms: None,
+            precise: false,
+        }
+    }
+
+    #[test]
+    fn upsert_perf_inserts_and_reads_back() {
+        let mut s = test_store();
+        s.upsert_perf(&[perf("claude:a", 1_000, 3_000, 2_000, 100)]).unwrap();
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows, vec![perf("claude:a", 1_000, 3_000, 2_000, 100)]);
+    }
+
+    #[test]
+    fn upsert_merges_split_claude_message() {
+        let mut s = test_store();
+        s.upsert_perf(&[perf("claude:a", 1_000, 2_000, 1_000, 50)]).unwrap();
+        // second pass: later chunk of the same message; its start anchor is unknown-ish (later)
+        s.upsert_perf(&[perf("claude:a", 1_900, 4_000, 2_100, 130)]).unwrap();
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].start_ms, 1_000);
+        assert_eq!(rows[0].end_ms, 4_000);
+        assert_eq!(rows[0].gen_ms, 3_000);
+        assert_eq!(rows[0].output_tokens, 130);
+    }
+
+    #[test]
+    fn delete_session_removes_perf_rows() {
+        let mut s = test_store();
+        s.upsert_perf(&[perf("claude:a", 1_000, 3_000, 2_000, 100)]).unwrap();
+        s.delete_session(Agent::Claude, "s1").unwrap();
+        assert!(s.perf_samples(0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn perf_samples_filters_by_since() {
+        let mut s = test_store();
+        s.upsert_perf(&[perf("claude:old", 0, 1_000, 1_000, 100), perf("claude:new", 5_000, 9_000, 4_000, 100)]).unwrap();
+        let rows = s.perf_samples(2_000).unwrap();
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["claude:new"]);
     }
 
     #[test]
