@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { TermSession } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import type { Session, Orphan } from "@/lib/types";
@@ -21,7 +22,10 @@ export const resolveTarget = (session: Session, terms: TermSession[]): JumpTarge
 };
 
 export const waitingLabel = (session: Session, nowMs: number): string =>
-  `${session.project} butuh jawaban · ${formatDuration(Math.max(0, nowMs - session.updatedAtMs))}`;
+  t("attention.waitingLabel", {
+    project: session.project,
+    duration: formatDuration(Math.max(0, nowMs - session.updatedAtMs)),
+  });
 
 // A stalled session is the louder problem, so it sorts ahead of a slow one; within
 // a group the longest silence comes first.
@@ -41,7 +45,11 @@ export const newlyStalled = (prev: Session[] | null, next: Session[]): Session[]
 };
 
 export const healthLabel = (session: Session): string =>
-  `${session.project} ${session.health === "stalled" ? "macet" : "lambat"} · ${session.healthReason ?? ""}`;
+  t("attention.healthLabel", {
+    project: session.project,
+    state: session.health === "stalled" ? t("attention.health.stalled") : t("attention.health.slow"),
+    reason: session.healthReason ?? "",
+  });
 
 export const orphanLabel = (orphan: Orphan): string =>
-  `${orphan.agent} jalan di ${orphan.cwd} tapi tidak ada sesi · ${formatDuration(orphan.ageMs)}`;
+  t("attention.orphanLabel", { agent: orphan.agent, cwd: orphan.cwd, duration: formatDuration(orphan.ageMs) });

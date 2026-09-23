@@ -37,7 +37,8 @@ describe("formatNotional", () => {
     expect(formatNotional(0.004)).toBe("≈ <$0,01");
   });
   test("the tooltip says the figure does not add to the bill", () => {
-    expect(NOTIONAL_HINT).toBe("Perkiraan kalau dibayar per token. Tidak menambah tagihan.");
+    // Resolved once at module load; the default language is always "en".
+    expect(NOTIONAL_HINT).toBe("Estimate if billed per token. Doesn't add to the bill.");
   });
 });
 
