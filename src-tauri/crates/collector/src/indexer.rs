@@ -475,6 +475,8 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
         let mut cwd = String::new();
         let mut ordinal: i64 = 0;
         let mut rows = Vec::new();
+        let mut perf_rows: Vec<PerfRow> = Vec::new();
+        let mut last_request_ts: Option<i64> = None;
         for line in &lines {
             let Ok(v) = serde_json::from_str::<Value>(line) else {
                 continue;
@@ -494,8 +496,33 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
                         model = m.to_string();
                     }
                 }
+                Some("response_item") => {
+                    let ptype = payload.get("type").and_then(Value::as_str);
+                    let is_user_message = ptype == Some("message")
+                        && payload.get("role").and_then(Value::as_str) == Some("user");
+                    if ptype == Some("function_call_output") || is_user_message {
+                        if let Some(ts) = v
+                            .get("timestamp")
+                            .and_then(Value::as_str)
+                            .and_then(parse_iso_ms)
+                        {
+                            last_request_ts = Some(ts);
+                        }
+                    }
+                }
                 Some("event_msg") => {
-                    if payload.get("type").and_then(Value::as_str) != Some("token_count") {
+                    let etype = payload.get("type").and_then(Value::as_str);
+                    if etype == Some("task_started") {
+                        if let Some(ts) = v
+                            .get("timestamp")
+                            .and_then(Value::as_str)
+                            .and_then(parse_iso_ms)
+                        {
+                            last_request_ts = Some(ts);
+                        }
+                        continue;
+                    }
+                    if etype != Some("token_count") {
                         continue;
                     }
                     ordinal += 1;
@@ -516,6 +543,7 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
                     } else {
                         project_name(&cwd, home)
                     };
+                    let tokens = codex_token_usage(usage);
                     rows.push(MessageRow {
                         id: format!("codex:{stem}:{ordinal}"),
                         agent: Agent::Codex,
@@ -523,8 +551,25 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
                         project,
                         model: model.clone(),
                         ts_ms: ts,
-                        tokens: codex_token_usage(usage),
+                        tokens: tokens.clone(),
                     });
+                    if let Some(a) = last_request_ts {
+                        if ts > a {
+                            perf_rows.push(PerfRow {
+                                id: format!("codex:{stem}:{ts}"),
+                                agent: Agent::Codex,
+                                session_id: stem.clone(),
+                                model: model.clone(),
+                                start_ms: a,
+                                end_ms: ts,
+                                gen_ms: ts - a,
+                                output_tokens: (tokens.output + tokens.reasoning) as i64,
+                                ttft_ms: None,
+                                precise: false,
+                            });
+                        }
+                    }
+                    last_request_ts = None;
                 }
                 _ => {}
             }
@@ -533,6 +578,9 @@ pub fn index_codex(store: &mut Store, sessions_dir: &Path, home: &str) -> IndexR
         match store.upsert_messages(&rows) {
             Ok(n) => report.messages_upserted += n,
             Err(e) => report.errors.push(format!("upsert failed: {e}")),
+        }
+        if let Err(e) = store.upsert_perf(&perf_rows) {
+            report.errors.push(format!("perf upsert failed: {e}"));
         }
         if let Err(e) = store.set_file_progress(&FileProgress {
             path: key,
@@ -1340,6 +1388,99 @@ mod tests {
 
         let projects = s.by_project(0).unwrap();
         assert_eq!(projects[0].project, "kirimi");
+    }
+
+    /// A fresh `Store` backed by its own tempdir, for tests that don't need
+    /// the returned dir for anything else (e.g. codex session fixtures live
+    /// under a separate tempdir already returned by `codex_sessions_with`).
+    fn test_store() -> Store {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(&tmp.path().join("agent-deck.db")).unwrap();
+        std::mem::forget(tmp);
+        s
+    }
+
+    fn codex_meta() -> String {
+        r#"{"timestamp":"2026-09-20T04:55:00.000Z","type":"session_meta","payload":{"session_id":"test","cwd":"/Users/yolk/Dev/kirimi"}}"#.to_string()
+    }
+
+    fn codex_turn_context(model: &str) -> String {
+        format!(
+            r#"{{"timestamp":"2026-09-20T04:55:01.000Z","type":"turn_context","payload":{{"cwd":"/Users/yolk/Dev/kirimi","model":"{model}"}}}}"#
+        )
+    }
+
+    /// An `event_msg` record at an explicit timestamp, with `extra` fields
+    /// merged into `payload` alongside `payload.type`.
+    fn codex_event_at(kind: &str, ts: &str, extra: serde_json::Value) -> String {
+        let mut payload = serde_json::json!({ "type": kind });
+        if let (Value::Object(payload), Value::Object(extra)) = (&mut payload, extra) {
+            payload.extend(extra);
+        }
+        format!(r#"{{"timestamp":"{ts}","type":"event_msg","payload":{payload}}}"#)
+    }
+
+    /// An `event_msg` `token_count` record at an explicit timestamp.
+    fn codex_token_count_at(ts: &str, output_tokens: u64, reasoning_output_tokens: u64) -> String {
+        format!(
+            r#"{{"timestamp":"{ts}","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":1,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}},"last_token_usage":{{"input_tokens":10,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":{output_tokens},"reasoning_output_tokens":{reasoning_output_tokens}}}}}}}}}"#
+        )
+    }
+
+    /// Writes `lines` as a single codex rollout file and returns the tempdir
+    /// (keep it alive) plus the `sessions` root.
+    fn codex_sessions_with(lines: &[String]) -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions = tmp.path().join("sessions");
+        let dir = sessions.join("2026/09/20");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("rollout-2026-09-20T11-55-06-test.jsonl"),
+            format!("{}\n", lines.join("\n")),
+        )
+        .unwrap();
+        (tmp, sessions)
+    }
+
+    #[test]
+    fn codex_token_count_yields_estimated_sample() {
+        let (tmp, sessions) = codex_sessions_with(&[
+            codex_meta(),
+            codex_turn_context("gpt-5.5"),
+            codex_event_at(
+                "task_started",
+                "2026-09-20T04:55:06.846Z",
+                serde_json::json!({}),
+            ),
+            codex_token_count_at("2026-09-20T04:55:24.102Z", 567, 33),
+        ]);
+        let mut s = test_store();
+        index_codex(&mut s, &sessions, home());
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].gen_ms, 17_256);
+        assert_eq!(rows[0].output_tokens, 600);
+        assert_eq!(rows[0].model, "gpt-5.5");
+        drop(tmp);
+    }
+
+    #[test]
+    fn codex_second_token_count_without_new_request_is_skipped() {
+        let (tmp, sessions) = codex_sessions_with(&[
+            codex_meta(),
+            codex_turn_context("gpt-5.5"),
+            codex_event_at(
+                "task_started",
+                "2026-09-20T04:55:06.846Z",
+                serde_json::json!({}),
+            ),
+            codex_token_count_at("2026-09-20T04:55:24.102Z", 567, 0),
+            codex_token_count_at("2026-09-20T04:55:28.355Z", 95, 0),
+        ]);
+        let mut s = test_store();
+        index_codex(&mut s, &sessions, home());
+        assert_eq!(s.perf_samples(0).unwrap().len(), 1);
+        drop(tmp);
     }
 
     fn opencode_db(dir: &Path) -> std::path::PathBuf {
