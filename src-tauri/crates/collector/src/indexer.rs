@@ -975,6 +975,143 @@ pub fn index_opencode(store: &mut Store, db: &Path, home: &str) -> IndexReport {
     report
 }
 
+/// Collects every Claude session file under `projects_dir`, same layout as
+/// `index_claude` (project dirs plus each session's `subagents/`).
+fn all_claude_files(projects_dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if !projects_dir.exists() {
+        return files;
+    }
+    if let Ok(entries) = std::fs::read_dir(projects_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                jsonl_files(&p, &mut files);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// Collects every Codex rollout file under `sessions_dir`, same layout as
+/// `index_codex`.
+fn all_codex_files(sessions_dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if !sessions_dir.exists() {
+        return files;
+    }
+    let mut stack = vec![sessions_dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if flag_observer(&p) {
+                continue;
+            }
+            if p.is_dir() {
+                stack.push(p);
+            } else if p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("rollout-") && n.ends_with(".jsonl"))
+                .unwrap_or(false)
+            {
+                files.push(p);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// One-time, perf-only backfill for a database that already has message and
+/// file-progress history from before perf tracking existed. Re-reads every
+/// Claude and Codex file from offset 0 through the shared perf-extraction
+/// functions, and runs the opencode perf pass with `since = 0`. Writes only
+/// `response_perf` rows: no message rows, and `indexed_file` progress is
+/// never touched, so the normal incremental pass is unaffected. Guarded by
+/// the `perf_backfilled` setting so it runs exactly once; a re-run is a
+/// cheap no-op (still safe either way, since `upsert_perf` merges by id).
+pub fn backfill_perf(
+    store: &mut Store,
+    claude_projects_dir: &Path,
+    codex_sessions_dir: &Path,
+    opencode_db: &Path,
+) -> IndexReport {
+    let mut report = IndexReport::default();
+    if store.setting("perf_backfilled").ok().flatten().is_some() {
+        return report;
+    }
+
+    for path in all_claude_files(claude_projects_dir) {
+        let key = path.to_string_lossy().to_string();
+        let Some((lines, mtime_ms, _offset)) = read_new_lines(&path, None) else {
+            report.errors.push(format!("read failed: {key}"));
+            continue;
+        };
+        let session_id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let parsed: Vec<Value> = lines
+            .iter()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .collect();
+        let perf_rows = claude_perf_from_lines(&parsed, &session_id, mtime_ms);
+        if let Err(e) = store.upsert_perf(&perf_rows) {
+            report.errors.push(format!("backfill perf upsert failed: {e}"));
+        }
+        report.files_scanned += 1;
+    }
+
+    for path in all_codex_files(codex_sessions_dir) {
+        let key = path.to_string_lossy().to_string();
+        let Some((lines, mtime_ms, _offset)) = read_new_lines(&path, None) else {
+            report.errors.push(format!("read failed: {key}"));
+            continue;
+        };
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.trim_start_matches("rollout-").to_string())
+            .unwrap_or_default();
+        let parsed: Vec<Value> = lines
+            .iter()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .collect();
+        let perf_rows = codex_perf_from_lines(&parsed, &stem, mtime_ms);
+        if let Err(e) = store.upsert_perf(&perf_rows) {
+            report.errors.push(format!("backfill perf upsert failed: {e}"));
+        }
+        report.files_scanned += 1;
+    }
+
+    if opencode_db.exists() {
+        match rusqlite::Connection::open_with_flags(
+            opencode_db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ) {
+            Ok(conn) => {
+                let _ = conn.busy_timeout(std::time::Duration::from_millis(500));
+                upsert_opencode_perf(store, &conn, 0, &mut report);
+                report.files_scanned += 1;
+            }
+            Err(_) => report
+                .errors
+                .push(format!("open failed: {}", opencode_db.display())),
+        }
+    }
+
+    if let Err(e) = store.set_setting("perf_backfilled", "1") {
+        report.errors.push(format!("backfill flag failed: {e}"));
+    }
+    report
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1435,6 +1572,165 @@ mod tests {
         index_claude(&mut s, &projects, home());
         index_claude(&mut s, &projects, home());
         assert_eq!(s.perf_samples(0).unwrap().len(), 1);
+    }
+
+    /// Stronger than `claude_reindex_does_not_duplicate`, which only proves
+    /// the file-progress skip prevents a rescan. This exercises the actual
+    /// `upsert_perf` merge: a normal pass writes a row from the first chunk
+    /// of a split message, then the file grows a second chunk before the
+    /// backfill re-reads the whole file from offset 0. The result must be
+    /// one row with the merged window, not a duplicate.
+    #[test]
+    fn backfill_merges_with_an_existing_estimated_row() {
+        let (tmp, projects) = claude_projects_with(&[
+            user_prompt_at("2026-09-23T02:02:19.282Z"),
+            assistant_chunk_at("m1", "2026-09-23T02:02:22.038Z", 130),
+        ]);
+        let mut s = store_at(tmp.path());
+        index_claude(&mut s, &projects, home());
+        assert_eq!(s.perf_samples(0).unwrap().len(), 1);
+
+        let file = projects.join(encode_cwd("/tmp/proj")).join("s1.jsonl");
+        append(
+            &file,
+            &format!("{}\n", assistant_chunk_at("m1", "2026-09-23T02:02:22.043Z", 130)),
+        );
+
+        let sessions_dir = tmp.path().join("sessions");
+        let opencode_db = tmp.path().join("opencode.db");
+        let report = backfill_perf(&mut s, &projects, &sessions_dir, &opencode_db);
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows.len(), 1, "backfill must merge into the existing row, not duplicate it");
+        assert_eq!(rows[0].id, "claude:m1");
+        assert_eq!(rows[0].gen_ms, 2_761);
+        assert_eq!(rows[0].output_tokens, 130);
+    }
+
+    #[test]
+    fn backfill_extracts_perf_without_touching_progress_or_messages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        let claude_dir = projects_dir.join(encode_cwd("/tmp/proj"));
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        let claude_file = claude_dir.join("s1.jsonl");
+        std::fs::write(
+            &claude_file,
+            format!(
+                "{}\n{}\n",
+                user_prompt_at("2026-09-23T02:02:19.282Z"),
+                assistant_chunk_at("m1", "2026-09-23T02:02:22.038Z", 130),
+            ),
+        )
+        .unwrap();
+
+        let sessions_dir = tmp.path().join("sessions");
+        let codex_dir = sessions_dir.join("2026/09/20");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let codex_file = codex_dir.join("rollout-2026-09-20T11-55-06-test.jsonl");
+        std::fs::write(
+            &codex_file,
+            format!(
+                "{}\n{}\n{}\n{}\n",
+                codex_meta(),
+                codex_turn_context("gpt-5.5"),
+                codex_event_at("task_started", "2026-09-20T04:55:06.846Z", serde_json::json!({})),
+                codex_token_count_at("2026-09-20T04:55:24.102Z", 567, 33),
+            ),
+        )
+        .unwrap();
+
+        let mut s = store_at(tmp.path());
+
+        // Simulate a database that already fully indexed both files before
+        // perf tracking existed: progress rows present, no perf, no messages.
+        let (claude_mtime, claude_size) = file_meta(&claude_file).unwrap();
+        s.set_file_progress(&FileProgress {
+            path: claude_file.to_string_lossy().to_string(),
+            mtime_ms: claude_mtime,
+            size: claude_size,
+            offset: claude_size,
+        })
+        .unwrap();
+        let (codex_mtime, codex_size) = file_meta(&codex_file).unwrap();
+        s.set_file_progress(&FileProgress {
+            path: codex_file.to_string_lossy().to_string(),
+            mtime_ms: codex_mtime,
+            size: codex_size,
+            offset: codex_size,
+        })
+        .unwrap();
+        assert!(s.perf_samples(0).unwrap().is_empty());
+
+        let opencode_db = tmp.path().join("opencode.db"); // missing: backfill must just skip it
+
+        let report = backfill_perf(&mut s, &projects_dir, &sessions_dir, &opencode_db);
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows.len(), 2, "one claude sample, one codex sample");
+        assert!(rows.iter().any(|r| r.agent == Agent::Claude));
+        assert!(rows.iter().any(|r| r.agent == Agent::Codex));
+
+        assert_eq!(s.counts().unwrap().1, 0, "backfill must not write message rows");
+        let p = s.file_progress(&claude_file.to_string_lossy()).unwrap();
+        assert_eq!(p.offset, claude_size, "backfill must not touch indexed_file");
+        let p = s.file_progress(&codex_file.to_string_lossy()).unwrap();
+        assert_eq!(p.offset, codex_size, "backfill must not touch indexed_file");
+
+        assert_eq!(s.setting("perf_backfilled").unwrap(), Some("1".to_string()));
+
+        let second = backfill_perf(&mut s, &projects_dir, &sessions_dir, &opencode_db);
+        assert!(second.errors.is_empty());
+        assert_eq!(second.files_scanned, 0, "the flag must short-circuit a second run");
+        assert_eq!(s.perf_samples(0).unwrap().len(), 2, "backfill must not run twice");
+    }
+
+    #[test]
+    fn backfill_opencode_picks_up_steps_older_than_any_lookback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_message(&db, "msg1", 1_000, "assistant", 0, 0);
+        insert_part(&db, "p1", "msg1", 1_000, serde_json::json!({"type":"step-start"}));
+        insert_part(
+            &db,
+            "p2",
+            "msg1",
+            1_100,
+            serde_json::json!({"type":"text","time":{"start":1_100,"end":2_100}}),
+        );
+        insert_part(
+            &db,
+            "p3",
+            "msg1",
+            2_200,
+            serde_json::json!({"type":"step-finish","tokens":{"output":40,"reasoning":0}}),
+        );
+
+        let mut s = store_at(tmp.path());
+        // The message pass already progressed far past this message's
+        // time_created, as a real pre-existing DB would have: the normal 1h
+        // lookback (`since - 3_600_000`) would never see it again.
+        s.set_file_progress(&FileProgress {
+            path: db.to_string_lossy().to_string(),
+            mtime_ms: 0,
+            size: 0,
+            offset: 10_000_000,
+        })
+        .unwrap();
+
+        let projects_dir = tmp.path().join("projects");
+        let sessions_dir = tmp.path().join("sessions");
+        let report = backfill_perf(&mut s, &projects_dir, &sessions_dir, &db);
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].gen_ms, 1_000);
+
+        let p = s.file_progress(&db.to_string_lossy()).unwrap();
+        assert_eq!(p.offset, 10_000_000, "backfill must not touch indexed_file");
     }
 
     #[test]

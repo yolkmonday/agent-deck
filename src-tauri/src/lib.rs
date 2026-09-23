@@ -10,7 +10,7 @@ use collector::billing::{
     cycle_for, days_left, format_date, local_date, parse_date_iso, start_of_day_ms, BillingAccount,
     BillingMode, BillingTable,
 };
-use collector::indexer::{index_claude, index_codex, index_opencode, IndexReport};
+use collector::indexer::{backfill_perf, index_claude, index_codex, index_opencode, IndexReport};
 use collector::health::Thresholds;
 use collector::live::{LiveCollector, Paths};
 use collector::model::{Agent, LiveSnapshot, TokenUsage};
@@ -400,6 +400,10 @@ fn run_index_pass(app: &tauri::AppHandle, state: &Arc<AppState>) -> Result<(), S
     reports.push(index_claude(&mut store, &claude_projects, &home));
     reports.push(index_opencode(&mut store, &paths.opencode_db, &home));
     reports.push(index_codex(&mut store, &codex_sessions, &home));
+    // One-time perf-only backfill for a database that predates perf
+    // tracking; a no-op once `perf_backfilled` is set, so calling it on every
+    // pass (startup and manual reindex alike) is cheap and safe.
+    reports.push(backfill_perf(&mut store, &claude_projects, &codex_sessions, &paths.opencode_db));
     drop(store);
 
     for r in &reports {
