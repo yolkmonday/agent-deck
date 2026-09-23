@@ -824,6 +824,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn migrating_an_inline_key_moves_it_to_the_secrets_file() {
         use std::os::unix::fs::PermissionsExt;
 

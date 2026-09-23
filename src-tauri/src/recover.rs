@@ -50,6 +50,7 @@ pub fn verify(pid: u32, procs: &dyn ProcessTable) -> Result<String, String> {
 ///
 /// Pid 0, pid 1 and this dashboard's own pid are refused outright. A negative
 /// pid cannot reach here at all: the parameter is unsigned.
+#[cfg(unix)]
 pub fn terminate(pid: u32, procs: &dyn ProcessTable, wait_ms: u64) -> Result<bool, String> {
     if pid <= 1 || pid == std::process::id() {
         return Err("pid tidak boleh dimatikan".into());
@@ -63,8 +64,16 @@ pub fn terminate(pid: u32, procs: &dyn ProcessTable, wait_ms: u64) -> Result<boo
     signal(pid, libc::SIGKILL)
 }
 
+/// SIGTERM/SIGKILL are unix signals; this dashboard has no Windows recovery
+/// path yet, so the action simply refuses.
+#[cfg(not(unix))]
+pub fn terminate(_pid: u32, _procs: &dyn ProcessTable, _wait_ms: u64) -> Result<bool, String> {
+    Err("menghentikan proses tidak didukung di platform ini".into())
+}
+
 /// `Ok(false)` means the pid was already gone, which is the outcome the caller
 /// wanted anyway.
+#[cfg(unix)]
 fn signal(pid: u32, sig: libc::c_int) -> Result<bool, String> {
     let rc = unsafe { libc::kill(pid as libc::pid_t, sig) };
     if rc == 0 {

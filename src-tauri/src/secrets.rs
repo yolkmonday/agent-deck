@@ -44,16 +44,35 @@ pub fn write_key(home: &str, provider_id: &str, key: &str) -> Result<()> {
     let dir = path.parent().context("key path has no parent")?;
     create_dir_0700(dir)?;
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&path)
+    let mut file = open_key_file(&path)
         .with_context(|| format!("cannot write {}", path.display()))?;
     file.write_all(key.as_bytes())?;
     file.sync_all()?;
     Ok(())
+}
+
+/// Opens the key file for writing with mode 0600, so the plaintext is never
+/// briefly world readable.
+#[cfg(unix)]
+fn open_key_file(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+}
+
+/// Permission hardening (0600) is unix-only; on other platforms the file is
+/// created with the platform's default permissions.
+#[cfg(not(unix))]
+fn open_key_file(path: &Path) -> std::io::Result<fs::File> {
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
 }
 
 #[cfg(unix)]
@@ -74,9 +93,6 @@ fn create_dir_0700(dir: &Path) -> Result<()> {
 fn create_dir_0700(dir: &Path) -> Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))
 }
-
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 
 pub fn read_key(home: &str, provider_id: &str) -> Result<String> {
     let path = key_path(home, provider_id)?;
@@ -123,6 +139,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn write_key_sets_0600_and_dir_0700() {
         use std::os::unix::fs::PermissionsExt;
 
