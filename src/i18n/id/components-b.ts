@@ -53,7 +53,7 @@ export const componentsB: Record<keyof typeof en, string> = {
   "providerTable.disabled": "nonaktif",
   "providerTable.plaintext": "plaintext",
   "providerTable.active": "aktif",
-  "providerTable.keyPlaintext": "— Key masih plaintext",
+  "providerTable.keyPlaintext": "— key masih plaintext",
   "providerTable.migrating": "Memindahkan…",
   "providerTable.moveToFile": "Pindahkan ke file 0600",
 
@@ -98,6 +98,7 @@ export const componentsB: Record<keyof typeof en, string> = {
 
   "sidebar.openWaitingTitle": "Buka sesi yang menunggu",
   "sidebar.waitingCount": "{count} tunggu",
+  "sidebar.settings": "Pengaturan",
 
   "spanDetail.statusOk": "Selesai",
   "spanDetail.statusError": "Gagal",

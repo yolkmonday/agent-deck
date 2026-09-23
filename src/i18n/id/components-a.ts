@@ -4,7 +4,6 @@ export const componentsA: Record<keyof typeof en, string> = {
   // AttentionBar
   "attentionBar.andMore": "dan {n} lainnya",
   "attentionBar.open": "Buka",
-  "attentionBar.notificationSettings": "Pengaturan notifikasi",
 
   // KpiRow
   "kpiRow.activeAgents": "Agent aktif",

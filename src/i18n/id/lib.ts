@@ -1,6 +1,15 @@
 import type { lib as en } from "@/i18n/en/lib";
 
 export const lib: Record<keyof typeof en, string> = {
+  "nav.live": "Live",
+  "nav.activity": "Aktivitas",
+  "nav.token": "Token & Biaya",
+  "nav.timeline": "Timeline",
+  "nav.savings": "Hemat Token",
+  "nav.terminal": "Terminal",
+  "nav.provider": "Model & Provider",
+  "nav.project": "Project",
+
   "attention.waitingLabel": "{project} butuh jawaban · {duration}",
   "attention.health.stalled": "macet",
   "attention.health.slow": "lambat",

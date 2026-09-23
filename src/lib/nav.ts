@@ -1,6 +1,7 @@
 import { Activity, BarChart3, Cpu, Folder, History, PiggyBank, Rss, SquareTerminal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createContext, useContext } from "react";
+import type { MessageKey } from "@/i18n";
 
 export type PageKey = "live" | "activity" | "token" | "timeline" | "savings" | "terminal" | "provider" | "project";
 
@@ -21,18 +22,18 @@ export const useNavigate = (): NavActions => {
 
 export interface NavItem {
   key: PageKey;
-  label: string;
+  labelKey: MessageKey;
   icon: LucideIcon;
   enabled: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { key: "live", label: "Live", icon: Activity, enabled: true },
-  { key: "activity", label: "Aktivitas", icon: Rss, enabled: true },
-  { key: "token", label: "Token & Biaya", icon: BarChart3, enabled: true },
-  { key: "timeline", label: "Timeline", icon: History, enabled: true },
-  { key: "savings", label: "Hemat Token", icon: PiggyBank, enabled: true },
-  { key: "terminal", label: "Terminal", icon: SquareTerminal, enabled: true },
-  { key: "provider", label: "Model & Provider", icon: Cpu, enabled: true },
-  { key: "project", label: "Project", icon: Folder, enabled: true },
+  { key: "live", labelKey: "nav.live", icon: Activity, enabled: true },
+  { key: "activity", labelKey: "nav.activity", icon: Rss, enabled: true },
+  { key: "token", labelKey: "nav.token", icon: BarChart3, enabled: true },
+  { key: "timeline", labelKey: "nav.timeline", icon: History, enabled: true },
+  { key: "savings", labelKey: "nav.savings", icon: PiggyBank, enabled: true },
+  { key: "terminal", labelKey: "nav.terminal", icon: SquareTerminal, enabled: true },
+  { key: "provider", labelKey: "nav.provider", icon: Cpu, enabled: true },
+  { key: "project", labelKey: "nav.project", icon: Folder, enabled: true },
 ];

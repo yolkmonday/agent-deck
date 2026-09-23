@@ -9,6 +9,8 @@ export interface UpdaterState {
   error: string | null;
   dismissed: string | null;
   manual: boolean;
+  /** True when the current "error" status came from a failed install, not a failed check. */
+  installError: boolean;
 }
 export type UpdaterEvent =
   | { type: "check"; manual: boolean }
@@ -26,30 +28,36 @@ export const initialUpdaterState: UpdaterState = {
   error: null,
   dismissed: null,
   manual: false,
+  installError: false,
 };
 
 export const reduce = (s: UpdaterState, e: UpdaterEvent): UpdaterState => {
   switch (e.type) {
     case "check":
       if (s.status === "downloading") return s;
-      return { ...s, status: "checking", error: null, manual: e.manual };
+      return { ...s, status: "checking", error: null, manual: e.manual, installError: false };
     case "found":
-      return { ...s, status: "available", version: e.version, progress: 0 };
+      return { ...s, status: "available", version: e.version, progress: 0, installError: false };
     case "none":
       return { ...s, status: "none" };
     case "failed":
-      return s.manual ? { ...s, status: "error", error: e.error } : { ...s, status: "idle", error: null };
+      if (s.manual) return { ...s, status: "error", error: e.error };
+      // A periodic re-check failing must not hide a banner for an update we already found.
+      if (s.version) return { ...s, status: "available", error: null };
+      return { ...s, status: "idle", error: null };
     case "progress":
       return { ...s, status: "downloading", progress: Math.min(1, Math.max(0, e.progress)) };
     case "dismiss":
-      return { ...s, dismissed: s.version };
+      return { ...s, dismissed: s.version, installError: false };
     case "install-failed":
-      return { ...s, status: "error", manual: true, error: e.error };
+      return { ...s, status: "error", manual: true, error: e.error, installError: true };
   }
 };
 
 export const bannerVisible = (s: UpdaterState): boolean =>
-  s.status === "downloading" || (s.status === "available" && s.version !== s.dismissed);
+  s.status === "downloading" ||
+  (s.status === "available" && s.version !== s.dismissed) ||
+  (s.status === "error" && s.installError);
 
 const AUTO_DELAY_MS = 10_000;
 const AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -66,7 +74,9 @@ export const useUpdater = create<
       if (get().status === "checking" || get().status === "downloading") return;
       dispatch({ type: "check", manual });
       try {
-        pending = await findUpdate();
+        const found = await findUpdate();
+        if (pending) void pending.dispose().catch(() => undefined);
+        pending = found;
         dispatch(pending ? { type: "found", version: pending.version } : { type: "none" });
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);

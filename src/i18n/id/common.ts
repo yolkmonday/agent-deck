@@ -7,6 +7,4 @@ export const common: Record<keyof typeof en, string> = {
   "common.close": "Tutup",
   "common.add": "Tambah",
   "common.edit": "Ubah",
-  "common.loading": "Memuat…",
-  "common.retry": "Coba lagi",
 };

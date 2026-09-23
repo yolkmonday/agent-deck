@@ -97,6 +97,7 @@ export const componentsB = {
 
   "sidebar.openWaitingTitle": "Open waiting sessions",
   "sidebar.waitingCount": "{count} waiting",
+  "sidebar.settings": "Settings",
 
   "spanDetail.statusOk": "Done",
   "spanDetail.statusError": "Failed",

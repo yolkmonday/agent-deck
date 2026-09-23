@@ -5,6 +5,4 @@ export const common = {
   "common.close": "Close",
   "common.add": "Add",
   "common.edit": "Edit",
-  "common.loading": "Loading…",
-  "common.retry": "Retry",
 } as const;

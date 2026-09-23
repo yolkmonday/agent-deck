@@ -1,12 +1,14 @@
+import { locale } from "@/i18n";
 import type { DailyRow } from "@/lib/api";
 import { totalTokens } from "@/lib/format";
 
-// $ amounts are not localized (see i18n constraints): the separator stays as-is
-// in both languages.
+// $ amounts keep the "$" prefix in both languages; only the decimal
+// separator follows the active locale (EN period, ID comma).
 export const formatUsd = (n: number): string => {
-  if (n === 0) return "$0,00";
-  if (Math.abs(n) < 0.01) return "<$0,01";
-  return `$${n.toFixed(2).replace(".", ",")}`;
+  const sep = locale() === "id-ID" ? "," : ".";
+  if (n === 0) return `$0${sep}00`;
+  if (Math.abs(n) < 0.01) return `<$0${sep}01`;
+  return `$${n.toFixed(2).replace(".", sep)}`;
 };
 
 export const formatNotional = (n: number): string => `≈ ${formatUsd(n)}`;

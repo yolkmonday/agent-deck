@@ -20,6 +20,17 @@ describe("updater reducer", () => {
     expect(s.status).toBe("error");
     expect(s.error).toBe("404");
   });
+  test("a manual check error (not install) leaves the banner hidden", () => {
+    const s = reduce(reduce(s0, { type: "check", manual: true }), { type: "failed", error: "404" });
+    expect(bannerVisible(s)).toBe(false);
+  });
+  test("a background recheck failure after finding a version keeps it available", () => {
+    let s = reduce(reduce(s0, { type: "check", manual: false }), { type: "found", version: "0.3.1" });
+    s = reduce(reduce(s, { type: "check", manual: false }), { type: "failed", error: "offline" });
+    expect(s.status).toBe("available");
+    expect(s.version).toBe("0.3.1");
+    expect(bannerVisible(s)).toBe(true);
+  });
   test("dismissed version stays hidden on re-check", () => {
     let s = reduce(reduce(s0, { type: "check", manual: false }), { type: "found", version: "0.3.1" });
     s = reduce(s, { type: "dismiss" });
@@ -45,12 +56,19 @@ describe("updater reducer", () => {
     s = reduce(s, { type: "check", manual: false });
     expect(s.status).toBe("downloading");
   });
-  test("install-failed from downloading shows the error and hides the banner", () => {
+  test("install-failed from downloading shows the error and keeps the banner visible", () => {
     let s = reduce(reduce(s0, { type: "found", version: "0.3.1" }), { type: "progress", progress: 0.4 });
     s = reduce(s, { type: "install-failed", error: "disk full" });
     expect(s.status).toBe("error");
     expect(s.error).toBe("disk full");
     expect(s.manual).toBe(true);
+    expect(s.installError).toBe(true);
+    expect(bannerVisible(s)).toBe(true);
+  });
+  test("dismiss after install-failed hides the banner", () => {
+    let s = reduce(reduce(s0, { type: "found", version: "0.3.1" }), { type: "progress", progress: 0.4 });
+    s = reduce(s, { type: "install-failed", error: "disk full" });
+    s = reduce(s, { type: "dismiss" });
     expect(bannerVisible(s)).toBe(false);
   });
 });

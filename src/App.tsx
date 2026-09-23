@@ -165,15 +165,20 @@ const App = () => {
           unhealthy={unhealthy}
           orphans={orphans}
           nowMs={nowMs}
-          settings={settings}
           onJump={firstJump}
           onOpenTerminal={goToTerminal}
-          onMode={(mode) => saveSettings({ ...settings, attentionMode: mode })}
-          onNotifySound={(notifySound) => saveSettings({ ...settings, notifySound })}
-          onMinutes={(value) => saveSettings({ ...settings, ...value })}
         />
         <div className="flex min-h-0 flex-1">
-          <Sidebar page={page} onSelect={setPage} onJumpWaiting={firstJump} waitingCount={waiting.length} />
+          <Sidebar
+            page={page}
+            onSelect={setPage}
+            onJumpWaiting={firstJump}
+            waitingCount={waiting.length}
+            settings={settings}
+            onMode={(mode) => saveSettings({ ...settings, attentionMode: mode })}
+            onNotifySound={(notifySound) => saveSettings({ ...settings, notifySound })}
+            onMinutes={(value) => saveSettings({ ...settings, ...value })}
+          />
           <div key={page} className="ad-fade flex min-h-0 min-w-0 flex-1 flex-col">
             {page === "live" && (
               <LivePage

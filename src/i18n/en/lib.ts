@@ -1,4 +1,13 @@
 export const lib = {
+  "nav.live": "Live",
+  "nav.activity": "Activity",
+  "nav.token": "Tokens & Cost",
+  "nav.timeline": "Timeline",
+  "nav.savings": "Token Savings",
+  "nav.terminal": "Terminal",
+  "nav.provider": "Model & Provider",
+  "nav.project": "Project",
+
   "attention.waitingLabel": "{project} needs an answer · {duration}",
   "attention.health.stalled": "stalled",
   "attention.health.slow": "slow",

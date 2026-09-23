@@ -2,7 +2,6 @@ export const componentsA = {
   // AttentionBar
   "attentionBar.andMore": "and {n} more",
   "attentionBar.open": "Open",
-  "attentionBar.notificationSettings": "Notification settings",
 
   // KpiRow
   "kpiRow.activeAgents": "Active agents",

@@ -23,6 +23,7 @@ export const SettingsPopover = ({
   onNotifySound,
   onMinutes,
   onClose,
+  placement = "down",
 }: {
   mode: AttentionMode;
   notifySound: boolean;
@@ -32,6 +33,8 @@ export const SettingsPopover = ({
   onNotifySound: (enabled: boolean) => void;
   onMinutes: (value: { stallMinutes: number; slowToolMinutes: number }) => void;
   onClose: () => void;
+  /** Which side of the trigger the popover opens toward. Defaults to "down". */
+  placement?: "up" | "down";
 }) => {
   const ref = useRef<HTMLDivElement | null>(null);
   const t = useT();
@@ -56,10 +59,11 @@ export const SettingsPopover = ({
     };
   }, [onClose]);
 
+  const posClass = placement === "up" ? "bottom-full left-0 mb-2" : "top-full right-0 mt-2";
   return (
     <div
       ref={ref}
-      className="ad-rise absolute top-full right-0 z-50 mt-2 flex w-72 flex-col gap-2 rounded-[10px] border border-border bg-surface p-3.5 shadow-lg"
+      className={`ad-rise absolute ${posClass} z-50 flex w-72 flex-col gap-2 rounded-[10px] border border-border bg-surface p-3.5 shadow-lg`}
     >
       <span className="text-[12px] font-semibold">{t("settings.attention.title")}</span>
       {OPTIONS.map(({ value, labelKey }) => (

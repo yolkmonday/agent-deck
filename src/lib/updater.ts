@@ -6,6 +6,8 @@ export interface FoundUpdate {
   version: string;
   notes: string | null;
   install: (onProgress: (p: number) => void) => Promise<void>;
+  /** Releases the underlying plugin resource. Safe to call once, before the next check. */
+  dispose: () => Promise<void>;
 }
 
 export const findUpdate = async (): Promise<FoundUpdate | null> => {
@@ -26,6 +28,7 @@ export const findUpdate = async (): Promise<FoundUpdate | null> => {
         if (e.event === "Finished") onProgress(1);
       });
     },
+    dispose: () => update.close(),
   };
 };
 
