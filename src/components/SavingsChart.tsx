@@ -1,4 +1,5 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useT } from "@/i18n";
 import type { SavingsDay } from "@/lib/api";
 import { formatTokens } from "@/lib/format";
 
@@ -18,6 +19,7 @@ const TooltipBox = ({
   payload?: { dataKey?: string | number; value?: number }[];
   label?: string;
 }) => {
+  const t = useT();
   if (!active || !payload?.length) return null;
   const sum = payload.reduce((acc, p) => acc + (p.value ?? 0), 0);
   return (
@@ -35,16 +37,17 @@ const TooltipBox = ({
         );
       })}
       <div className="mt-1.5 flex items-center gap-2 border-t border-border pt-1.5 text-[11.5px] text-fg-2">
-        <span className="flex-1">Total</span>
+        <span className="flex-1">{t("savingsChart.total")}</span>
         <span className="font-mono text-fg">{formatTokens(sum)}</span>
       </div>
     </div>
   );
 };
 
-export const SavingsChart = ({ data }: { data: SavingsDay[] }) =>
-  data.length === 0 ? (
-    <div className="flex h-64 items-center justify-center text-sm text-fg-3">Belum ada data.</div>
+export const SavingsChart = ({ data }: { data: SavingsDay[] }) => {
+  const t = useT();
+  return data.length === 0 ? (
+    <div className="flex h-64 items-center justify-center text-sm text-fg-3">{t("savingsChart.empty")}</div>
   ) : (
     <div className="h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -72,3 +75,4 @@ export const SavingsChart = ({ data }: { data: SavingsDay[] }) =>
       </ResponsiveContainer>
     </div>
   );
+};

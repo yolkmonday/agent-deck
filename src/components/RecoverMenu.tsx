@@ -1,10 +1,10 @@
 import { Icon } from "@iconify/react";
 import { useEffect, useRef, useState } from "react";
+import { useT } from "@/i18n";
 import { recoverKill, recoverNudge, recoverRestart, type RecoverAction, type RecoverResult } from "@/lib/api";
 import type { Session } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
 
-const NUDGE_HINT = "hanya untuk sesi yang dimulai dari sini";
 const RESULT_MS = 6000;
 
 const actionClass = (disabled: boolean) =>
@@ -21,6 +21,7 @@ export const RecoverMenu = ({
   session: Session;
   onOpenTerminal: (termId: string) => void;
 }) => {
+  const t = useT();
   const terminals = useTerminal((st) => st.sessions);
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState<RecoverAction | null>(null);
@@ -88,9 +89,9 @@ export const RecoverMenu = ({
 
   const confirmText =
     confirm === "kill"
-      ? `Hentikan proses ${session.project} (pid ${pid})? Pekerjaan yang belum tersimpan bisa hilang.`
+      ? t("recoverMenu.confirmKill", { project: session.project, pid: pid ?? "-" })
       : confirm === "restart"
-        ? `Hentikan ${session.project} lalu mulai sesi baru di folder yang sama? Percakapan lama akan hilang.`
+        ? t("recoverMenu.confirmRestart", { project: session.project })
         : "";
 
   const disabled = busy || pid === null;
@@ -109,7 +110,7 @@ export const RecoverMenu = ({
         }`}
       >
         <Icon icon="lucide:life-buoy" width={13} height={13} />
-        Tindakan
+        {t("recoverMenu.actions")}
       </button>
       {open && (
         <div className="absolute top-full right-0 z-30 mt-1 flex w-72 flex-col gap-1.5 rounded-[10px] border border-border bg-surface p-2.5 shadow-lg">
@@ -121,16 +122,18 @@ export const RecoverMenu = ({
                 onClick={() => void send("nudge")}
                 className={actionClass(owned === null || busy)}
               >
-                Kirim Enter
+                {t("recoverMenu.sendEnter")}
               </button>
-              {owned === null && <span className="px-2 text-[11px] leading-[1.4] text-fg-3">{NUDGE_HINT}</span>}
+              {owned === null && (
+                <span className="px-2 text-[11px] leading-[1.4] text-fg-3">{t("recoverMenu.nudgeHint")}</span>
+              )}
               <button
                 type="button"
                 disabled={disabled}
                 onClick={() => setConfirm("restart")}
                 className={actionClass(disabled)}
               >
-                Restart
+                {t("recoverMenu.restart")}
               </button>
               <button
                 type="button"
@@ -140,7 +143,7 @@ export const RecoverMenu = ({
                   disabled ? "cursor-default text-fg-3" : "cursor-pointer text-err hover:bg-err/10"
                 }`}
               >
-                Hentikan
+                {t("recoverMenu.stop")}
               </button>
             </>
           ) : (
@@ -156,7 +159,7 @@ export const RecoverMenu = ({
                   onClick={() => setConfirm(null)}
                   className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[12px] text-fg-2"
                 >
-                  Batal
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -166,7 +169,7 @@ export const RecoverMenu = ({
                     confirm === "kill" ? "bg-err" : "bg-waiting"
                   }`}
                 >
-                  Yakin?
+                  {t("recoverMenu.confirm")}
                 </button>
               </div>
             </>
