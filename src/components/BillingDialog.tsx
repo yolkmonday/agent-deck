@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useT, type MessageKey } from "@/i18n";
 import { billingAccounts, billingSave, type BillingAccount } from "@/lib/api";
 import type { BillingMode } from "@/lib/types";
 
-const MODES: { value: BillingMode; label: string; hint: string }[] = [
-  { value: "subscription", label: "Langganan", hint: "Bayar bulanan tetap, berapa pun token yang dipakai." },
-  { value: "prepaid", label: "Prabayar", hint: "Saldo diisi di muka, lalu terpotong per token." },
-  { value: "payg", label: "Per token", hint: "Ditagih sesuai pemakaian, tanpa komitmen." },
+const MODES: { value: BillingMode; label: MessageKey; hint: MessageKey }[] = [
+  { value: "subscription", label: "billingDialog.modeSubscription", hint: "billingDialog.modeSubscriptionHint" },
+  { value: "prepaid", label: "billingDialog.modePrepaid", hint: "billingDialog.modePrepaidHint" },
+  { value: "payg", label: "billingDialog.modePayg", hint: "billingDialog.modePaygHint" },
 ];
 
 type Row = Omit<BillingAccount, "monthlyUsd" | "renewalDay" | "creditUsd"> & {
@@ -73,6 +74,7 @@ const input =
   "rounded-md border bg-bg px-2 py-1.5 font-mono text-[12.5px] text-fg outline-none border-border focus:border-busy";
 
 export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
+  const t = useT();
   const qc = useQueryClient();
   const [rows, setRows] = useState<Row[] | null>(null);
   const query = useQuery({ queryKey: ["billing", "accounts"], queryFn: billingAccounts });
@@ -103,18 +105,15 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
       >
         <div className="flex items-start justify-between">
           <div className="flex flex-col gap-1">
-            <h2 className="text-base font-semibold">Langganan &amp; saldo</h2>
-            <span className="text-xs text-fg-2">
-              Tandai model mana yang sudah dibayar bulanan atau pakai saldo, supaya estimasi biaya tidak
-              dihitung sebagai tagihan.
-            </span>
+            <h2 className="text-base font-semibold">{t("billingDialog.title")}</h2>
+            <span className="text-xs text-fg-2">{t("billingDialog.description")}</span>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="ad-interactive ad-press cursor-pointer rounded-md px-2 py-1 text-xs text-fg-3 hover:text-fg"
           >
-            Tutup
+            {t("common.close")}
           </button>
         </div>
 
@@ -125,17 +124,17 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
         )}
 
         {rows === null ? (
-          <div className="py-8 text-center text-sm text-fg-3">Memuat akun…</div>
+          <div className="py-8 text-center text-sm text-fg-3">{t("billingDialog.loadingAccounts")}</div>
         ) : rows.length === 0 ? (
           <div className="rounded-[10px] border border-dashed border-border p-6 text-center text-sm text-fg-3">
-            Belum ada akun. Kosongkan kalau semua model dibayar per token.
+            {t("billingDialog.empty")}
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
             {rows.map((r, i) => (
               <div key={r.id} className="flex flex-col gap-3 rounded-[10px] border border-border bg-bg p-4">
                 <div className="flex items-end gap-3">
-                  <Field label="Nama akun">
+                  <Field label={t("billingDialog.accountName")}>
                     <input
                       value={r.label}
                       onChange={(e) => patch(i, { label: e.target.value })}
@@ -143,7 +142,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
                       className={`${input} w-48 ${r.label.trim() === "" ? "border-err" : ""}`}
                     />
                   </Field>
-                  <Field label="Cara bayar">
+                  <Field label={t("billingDialog.paymentMethod")}>
                     <select
                       value={r.mode}
                       onChange={(e) => patch(i, { mode: e.target.value as BillingMode })}
@@ -151,24 +150,24 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
                     >
                       {MODES.map((m) => (
                         <option key={m.value} value={m.value}>
-                          {m.label}
+                          {t(m.label)}
                         </option>
                       ))}
                     </select>
                   </Field>
                   <span className="flex-1 pb-1.5 text-[11.5px] text-fg-3">
-                    {MODES.find((m) => m.value === r.mode)?.hint}
+                    {t(MODES.find((m) => m.value === r.mode)?.hint ?? "billingDialog.modePaygHint")}
                   </span>
                   <button
                     type="button"
                     onClick={() => setRows((prev) => prev?.filter((_, idx) => idx !== i) ?? prev)}
                     className="ad-interactive ad-press cursor-pointer rounded-md px-2 py-1.5 text-xs text-fg-3 hover:bg-err/10 hover:text-err"
                   >
-                    Hapus
+                    {t("common.delete")}
                   </button>
                 </div>
 
-                <Field label="Model yang dicakup (awalan, pisah dengan koma)">
+                <Field label={t("billingDialog.matchesLabel")}>
                   <input
                     value={r.matches.join(", ")}
                     onChange={(e) => patch(i, { matches: e.target.value.split(",").map((s) => s) })}
@@ -182,7 +181,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
                 <div className="flex items-end gap-3">
                   {r.mode === "subscription" && (
                     <>
-                      <Field label="Biaya per bulan (USD)">
+                      <Field label={t("billingDialog.monthlyCost")}>
                         <input
                           value={r.monthlyUsd}
                           onChange={(e) => patch(i, { monthlyUsd: e.target.value })}
@@ -192,7 +191,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
                           }`}
                         />
                       </Field>
-                      <Field label="Tanggal perpanjangan (1-28)">
+                      <Field label={t("billingDialog.renewalDate")}>
                         <input
                           value={r.renewalDay}
                           onChange={(e) => patch(i, { renewalDay: e.target.value })}
@@ -210,7 +209,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
                   )}
                   {r.mode === "prepaid" && (
                     <>
-                      <Field label="Saldo diisi (USD)">
+                      <Field label={t("billingDialog.creditLoaded")}>
                         <input
                           value={r.creditUsd}
                           onChange={(e) => patch(i, { creditUsd: e.target.value })}
@@ -220,7 +219,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
                           }`}
                         />
                       </Field>
-                      <Field label="Mulai dipakai (YYYY-MM-DD)">
+                      <Field label={t("billingDialog.startedUsing")}>
                         <input
                           value={r.startedOn ?? ""}
                           onChange={(e) => patch(i, { startedOn: e.target.value })}
@@ -233,7 +232,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
                     </>
                   )}
                   {r.mode !== "payg" && (
-                    <Field label="Berakhir (YYYY-MM-DD, opsional)">
+                    <Field label={t("billingDialog.expires")}>
                       <input
                         value={r.expiresOn ?? ""}
                         onChange={(e) => patch(i, { expiresOn: e.target.value })}
@@ -243,26 +242,24 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
                     </Field>
                   )}
                   {r.mode === "payg" && (
-                    <span className="pb-1.5 text-[11.5px] text-fg-3">
-                      Ditagih per token. Tidak ada biaya tetap atau saldo yang perlu diisi.
-                    </span>
+                    <span className="pb-1.5 text-[11.5px] text-fg-3">{t("billingDialog.paygHint")}</span>
                   )}
                 </div>
               </div>
             ))}
-            {!allValid && <span className="text-xs text-err">Lengkapi kolom yang ditandai.</span>}
+            {!allValid && <span className="text-xs text-err">{t("billingDialog.fillMarked")}</span>}
           </div>
         )}
 
         <div className="flex items-center justify-between border-t border-border pt-4">
-          <span className="text-xs text-fg-3">Kosongkan kalau semua model dibayar per token.</span>
+          <span className="text-xs text-fg-3">{t("billingDialog.emptyHint")}</span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setRows((prev) => [...(prev ?? []), blank()])}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:border-fg-3 hover:text-fg"
             >
-              Tambah akun
+              {t("billingDialog.addAccount")}
             </button>
             <button
               type="button"
@@ -270,7 +267,7 @@ export const BillingDialog = ({ onClose }: { onClose: () => void }) => {
               onClick={() => rows && save.mutate(rows.map(toAccount))}
               className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
             >
-              {save.isPending ? "Menyimpan…" : "Simpan"}
+              {save.isPending ? t("billingDialog.saving") : t("common.save")}
             </button>
           </div>
         </div>

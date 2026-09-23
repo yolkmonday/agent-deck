@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "@iconify/react";
 import { useEffect, useState } from "react";
 import { AgentIcon } from "@/components/BrandIcon";
+import { useT } from "@/i18n";
 import type { Project, TermProfile } from "@/lib/api";
 import { projectTouch, projectsList, termProfiles } from "@/lib/api";
 import { useNavigate } from "@/lib/nav";
@@ -27,6 +28,7 @@ const displayCommand = (profile: TermProfile) =>
 const byRecentUse = (a: Project, b: Project) => (b.lastUsedMs ?? 0) - (a.lastUsedMs ?? 0);
 
 export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
+  const t = useT();
   const nav = useNavigate();
   const qc = useQueryClient();
   const sessions = useLive((s) => s.snapshot?.sessions ?? []);
@@ -82,7 +84,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
     try {
       const typed = cwd.trim();
       const picked = await pickFolder({
-        title: "Pilih folder kerja",
+        title: t("newSessionDialog.pickerTitle"),
         defaultPath: typed.startsWith("/") ? typed : undefined,
       });
       if (picked === null) return;
@@ -117,14 +119,12 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 px-6">
       <div className="flex max-h-[85vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-[12px] border border-border bg-surface p-5">
         <div className="flex flex-col gap-0.75">
-          <span className="text-base font-semibold">Sesi baru</span>
-          <span className="text-xs text-fg-2">
-            Perintah dijalankan langsung, tanpa shell dan tanpa alias dari terminalmu.
-          </span>
+          <span className="text-base font-semibold">{t("newSessionDialog.title")}</span>
+          <span className="text-xs text-fg-2">{t("newSessionDialog.description")}</span>
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-xs text-fg-3">Project</span>
+          <span className="text-xs text-fg-3">{t("newSessionDialog.project")}</span>
           <div className="flex flex-col gap-1.5">
             <button
               type="button"
@@ -134,15 +134,15 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
               }`}
             >
               <span className="size-2 rounded-full bg-idle" />
-              <span className="flex-1">Folder bebas</span>
-              <span className="font-mono text-[11.5px] text-fg-3">ketik sendiri</span>
+              <span className="flex-1">{t("newSessionDialog.freeFolder")}</span>
+              <span className="font-mono text-[11.5px] text-fg-3">{t("newSessionDialog.typeItYourself")}</span>
             </button>
 
             {projects.isPending ? (
-              <span className="text-xs text-fg-3">Memuat project…</span>
+              <span className="text-xs text-fg-3">{t("newSessionDialog.loadingProjects")}</span>
             ) : saved.length === 0 ? (
               <div className="flex flex-col gap-1.5 rounded-md border border-dashed border-border px-3 py-2.5">
-                <span className="text-xs text-fg-3">Belum ada project tersimpan.</span>
+                <span className="text-xs text-fg-3">{t("newSessionDialog.noProjectsSaved")}</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -151,7 +151,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
                   }}
                   className="ad-interactive ad-press cursor-pointer self-start rounded-md border border-border px-2.5 py-1 text-[11.5px] font-medium text-fg-2 hover:text-fg"
                 >
-                  Buka halaman Project
+                  {t("newSessionDialog.openProjectPage")}
                 </button>
               </div>
             ) : (
@@ -175,7 +175,9 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
                       </span>
                     </span>
                     {!p.exists && (
-                      <span className="shrink-0 text-[11.5px] font-semibold text-err">Folder hilang</span>
+                      <span className="shrink-0 text-[11.5px] font-semibold text-err">
+                        {t("newSessionDialog.folderMissing")}
+                      </span>
                     )}
                   </button>
                 );
@@ -185,7 +187,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-xs text-fg-3">Agent</span>
+          <span className="text-xs text-fg-3">{t("newSessionDialog.agentLabel")}</span>
           <div className="flex flex-col gap-1.5">
             {profiles.map((p) => (
               <button
@@ -204,16 +206,18 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
                 />
                 <span className="flex-1">{p.label}</span>
                 <span className="font-mono text-[11.5px] text-fg-3">
-                  {p.available ? p.program : "Tidak ditemukan di PATH"}
+                  {p.available ? p.program : t("newSessionDialog.notFoundInPath")}
                 </span>
               </button>
             ))}
-            {profiles.length === 0 && !error && <span className="text-xs text-fg-3">Memuat profil…</span>}
+            {profiles.length === 0 && !error && (
+              <span className="text-xs text-fg-3">{t("newSessionDialog.loadingProfiles")}</span>
+            )}
           </div>
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-xs text-fg-3">Direktori kerja</span>
+          <span className="text-xs text-fg-3">{t("newSessionDialog.workingDirectory")}</span>
           <div className="flex items-center gap-2">
             <input
               value={cwd}
@@ -223,7 +227,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
                 setProjectId(null);
               }}
               list="terminal-cwd-options"
-              placeholder="/Users/kamu/Dev/proyek"
+              placeholder={t("newSessionDialog.cwdPlaceholder")}
               className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs text-fg outline-none focus:border-busy/60"
             />
             <button
@@ -233,7 +237,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
               className="ad-interactive ad-press flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-[11.5px] font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
             >
               <Icon icon="lucide:folder-open" width={13} height={13} />
-              {picking ? "Membuka…" : "Pilih folder…"}
+              {picking ? t("newSessionDialog.opening") : t("newSessionDialog.chooseFolder")}
             </button>
           </div>
           <datalist id="terminal-cwd-options">
@@ -242,17 +246,19 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
             ))}
           </datalist>
           {pickError !== null && (
-            <span className="font-mono text-[11.5px] text-err">Gagal membuka Finder: {pickError}</span>
+            <span className="font-mono text-[11.5px] text-err">
+              {t("newSessionDialog.pickFailed", { error: pickError })}
+            </span>
           )}
         </div>
 
         <div className="flex flex-col gap-2 rounded-md border border-border bg-bg px-3 py-2.5">
-          <span className="text-[11.5px] font-semibold text-fg-3">Perintah yang akan dijalankan</span>
+          <span className="text-[11.5px] font-semibold text-fg-3">{t("newSessionDialog.commandToRun")}</span>
           <span className="break-all font-mono text-xs leading-[1.4]">
             {selected ? displayCommand(selected) : "-"}
           </span>
           <div className="flex gap-2">
-            <span className="w-14 shrink-0 text-[11.5px] text-fg-3">Folder</span>
+            <span className="w-14 shrink-0 text-[11.5px] text-fg-3">{t("newSessionDialog.folder")}</span>
             <span className="break-all font-mono text-xs text-fg-2">{cwd.trim() || "-"}</span>
           </div>
         </div>
@@ -269,7 +275,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
             onClick={onClose}
             className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3.5 py-2 text-[13px] text-fg-2 hover:border-fg-3 hover:text-fg"
           >
-            Batal
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -279,7 +285,7 @@ export const NewSessionDialog = ({ onClose }: { onClose: () => void }) => {
               canStart ? "ad-interactive cursor-pointer bg-busy text-bg hover:opacity-90" : "cursor-default bg-surface-2 text-fg-3"
             }`}
           >
-            {busy ? "Menjalankan…" : "Jalankan"}
+            {busy ? t("newSessionDialog.running") : t("newSessionDialog.run")}
           </button>
         </div>
       </div>
