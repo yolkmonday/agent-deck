@@ -1415,6 +1415,44 @@ mod tests {
     }
 
     #[test]
+    fn opencode_step_completed_after_first_index_is_caught_by_lookback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = opencode_db(tmp.path());
+        insert_message(&db, "msg1", 1_000, "assistant", 0, 0);
+        insert_part(&db, "p1", "msg1", 1_000, serde_json::json!({"type":"step-start"}));
+        insert_part(
+            &db,
+            "p2",
+            "msg1",
+            1_100,
+            serde_json::json!({"type":"text","time":{"start":1_100,"end":1_600}}),
+        );
+        let mut s = store_at(tmp.path());
+        index_opencode(&mut s, &db, home());
+        assert!(
+            s.perf_samples(0).unwrap().is_empty(),
+            "no step-finish yet: no row should be produced"
+        );
+
+        // The message is still streaming: the step only finishes now. The
+        // message pass's `since` already moved past this message's
+        // time_created (1_000), so without the 1h lookback the part query
+        // would never see it again and this step's timing would be lost.
+        insert_part(
+            &db,
+            "p3",
+            "msg1",
+            2_000,
+            serde_json::json!({"type":"step-finish","tokens":{"output":40,"reasoning":0}}),
+        );
+        index_opencode(&mut s, &db, home());
+        let rows = s.perf_samples(0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].gen_ms, 500);
+        drop(tmp);
+    }
+
+    #[test]
     fn opencode_spans_map_status() {
         let tmp = tempfile::tempdir().unwrap();
         let db = opencode_db(tmp.path());
