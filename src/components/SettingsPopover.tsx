@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { UpdateSection } from "@/components/UpdateSection";
 import type { AttentionMode } from "@/lib/api";
 import { type Lang, type MessageKey, useLang, useT } from "@/i18n";
 
@@ -109,6 +110,7 @@ export const SettingsPopover = ({
           className="w-14 rounded-md border border-border bg-bg px-2 py-1 text-right font-mono text-[12.5px] text-fg"
         />
       </label>
+      <UpdateSection />
       <div className="flex flex-col gap-1.5 border-t border-border pt-2">
         <span className="text-[12px] font-semibold">{t("settings.language")}</span>
         <div className="flex gap-1 rounded-md bg-surface-2 p-0.5">
