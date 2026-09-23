@@ -1,6 +1,9 @@
+import { t } from "@/i18n";
 import type { DailyRow } from "@/lib/api";
 import { totalTokens } from "@/lib/format";
 
+// $ amounts are not localized (see i18n constraints): the separator stays as-is
+// in both languages.
 export const formatUsd = (n: number): string => {
   if (n === 0) return "$0,00";
   if (Math.abs(n) < 0.01) return "<$0,01";
@@ -8,8 +11,10 @@ export const formatUsd = (n: number): string => {
 };
 
 /** Never show a bare dollar amount for a subscription: it is an estimate of what
- *  the same tokens would have cost at API rates, not a bill. */
-export const NOTIONAL_HINT = "Perkiraan kalau dibayar per token. Tidak menambah tagihan.";
+ *  the same tokens would have cost at API rates, not a bill.
+ *  Resolved once at module load; language switches take effect after reload
+ *  since consumers use this as a plain string constant, not a t() call. */
+export const NOTIONAL_HINT = t("cost.notionalHint");
 
 export const formatNotional = (n: number): string => `≈ ${formatUsd(n)}`;
 

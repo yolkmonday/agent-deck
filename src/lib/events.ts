@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { FeedEvent, Session } from "@/lib/types";
 
 const toolText = (s: Session): string | null => {
@@ -17,13 +18,13 @@ export const diffEvents = (prev: Session[] | null, next: Session[], nowMs: numbe
     const old = before.get(s.id);
     if (!old) {
       const color = s.status === "waiting" ? "waiting" : s.status === "idle" ? "idle" : "busy";
-      push(s, color, "sesi dimulai");
+      push(s, color, t("events.started"));
       continue;
     }
     if (old.status !== s.status) {
-      if (s.status === "waiting") push(s, "waiting", "butuh jawaban");
-      else if (s.status === "idle") push(s, "idle", "diam");
-      else push(s, "busy", "sibuk lagi");
+      if (s.status === "waiting") push(s, "waiting", t("events.waiting"));
+      else if (s.status === "idle") push(s, "idle", t("events.idle"));
+      else push(s, "busy", t("events.busyAgain"));
       continue;
     }
     const tool = toolText(s);
