@@ -24,13 +24,17 @@ Custom typed dictionary, no new dependency.
 
 ```
 src/i18n/
-  en.ts        // source of truth: export const en = { "settings.title": "Settings", ... } as const
-  id.ts        // export const id: Record<keyof typeof en, string> = { ... }
-  index.ts     // store, useT(), t(), Lang type
+  en/<area>.ts   // source of truth per area: export const settings = { "settings.title": "Settings", ... } as const
+  en/index.ts    // export const en = { ...common, ...settings, ... } as const
+  id/<area>.ts   // export const settings: Record<keyof typeof enSettings, string> = { ... }
+  id/index.ts    // export const id: Record<keyof typeof en, string> = { ...common, ... }
+  index.ts       // store, useT(), t(), locale(), Lang type
 ```
 
+Per-area files let parallel workers edit disjoint files.
+
 - Keys are flat dotted strings grouped by area: `common.*`, `settings.*`, `project.*`, `session.*`, `terminal.*`, `provider.*`, `pricing.*`, `billing.*`, `live.*`, `timeline.*`, `token.*`, `savings.*`, `activity.*`, `notify.*`, `update.*`.
-- `id.ts` typed as `Record<keyof typeof en, string>` → a missing or extra key is a compile error (`tsc` in `bun run build`).
+- Each `id/<area>.ts` typed as `Record<keyof typeof en, string>` → a missing or extra key is a compile error (`tsc` in `bun run build`).
 - Interpolation: `{name}` placeholders, `t("update.available", { version: "0.3.0" })`. Simple regex replace; missing param leaves the placeholder visible.
 - Plurals: no plural engine. Where needed, use two keys (`*.one` / `*.other`) and pick in code. Both EN and ID only need one/other.
 
@@ -42,6 +46,7 @@ src/i18n/
 - `useT()` returns `t(key, params?)` bound to the current lang; components re-render on change.
 - Non-React code (e.g. `src/lib/notify.ts`) uses `t()` that reads `useLang.getState()`.
 - Date/number formatting that is locale-dependent uses `lang === "id" ? "id-ID" : "en-US"` via a helper `locale()` exported from `src/i18n/index.ts`.
+- Unit formatters in `src/lib/format.ts` and `src/lib/perf.ts` follow the active language: EN `18.4M`, `448.7K`, `26 min`, `1 h 4 min`, `12 s`; ID keeps today's output `18,4 jt`, `448,7 rb`, `26 mnt`, `1 j 4 mnt`, `12 dtk`. Hardcoded `"id-ID"` in `toLocale*`/`Intl` calls is replaced by `locale()`.
 
 ### Settings UI
 
@@ -50,9 +55,9 @@ src/i18n/
 ### String migration
 
 - Every user-facing string in `src/**/*.tsx|ts` (JSX text, `title`, `placeholder`, `aria-label`, toast/notification text, confirm dialog text) moves to `en.ts`.
-- Strings currently written in Indonesian (14 files: SettingsPopover, ProjectList, NewSessionDialog, SessionCard, RecoverMenu, PricingDialog, ProjectForm, KeyField, BillingDialog, ModelList, ModelPickerDialog, TerminalPage, ProviderEditPage, ProjectPage) get an English version in `en.ts` and the original meaning in `id.ts`.
+- Strings currently written in Indonesian (~35 files across `src/components`, `src/pages`, `src/lib`) get an English version in `en.ts` and the original meaning in `id.ts`.
 - Not translated: brand/product names, model ids, CLI commands, keyboard shortcut labels, units like `tok/s`.
-- Tests that assert on visible text keep working because the default lang in tests is `en`; tests asserting Indonesian text are updated to the English string.
+- Tests that assert on visible text keep working because the default lang in tests is `en`; existing tests asserting Indonesian text set `useLang.setState({ lang: "id" })` in `beforeEach` and gain matching English cases.
 
 ---
 
@@ -130,5 +135,5 @@ v0.2.1 and older have no updater. The first release that includes this feature (
 
 ## Files touched (summary)
 
-- New: `src/i18n/{en,id,index}.ts`, `src/lib/updater.ts`, `src/store/updater.ts`, `src/components/UpdateBanner.tsx`, tests.
-- Modified: ~69 TS/TSX files (string extraction), `SettingsPopover.tsx`, app shell (banner mount), `src-tauri/Cargo.toml`, `src-tauri/src/lib.rs`, `src-tauri/tauri.conf.json`, `src-tauri/capabilities/default.json`, `package.json`, `.github/workflows/release.yml`.
+- New: `src/i18n/**`, `src/lib/updater.ts`, `src/store/updater.ts`, `src/components/UpdateBanner.tsx`, tests.
+- Modified: ~50 TS/TSX files (string extraction), `SettingsPopover.tsx`, app shell (banner mount), `src-tauri/Cargo.toml`, `src-tauri/src/lib.rs`, `src-tauri/tauri.conf.json`, `src-tauri/capabilities/default.json`, `package.json`, `.github/workflows/release.yml`.
