@@ -51,7 +51,10 @@ export const PerfPanel = () => {
         />
         <button
           type="button"
-          onClick={() => setGrouped((v) => !v)}
+          onClick={() => {
+            setGrouped((v) => !v);
+            setSelected([]);
+          }}
           aria-pressed={grouped}
           className={`ad-interactive ad-press cursor-pointer rounded-lg border border-border px-3 py-1.75 text-xs font-medium ${grouped ? "bg-surface-2 text-fg" : "text-fg-2 hover:border-fg-3 hover:text-fg"}`}
         >
