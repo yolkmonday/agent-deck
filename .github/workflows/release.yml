@@ -1,0 +1,104 @@
+name: release
+
+# Builds Agent Deck for macOS (arm64 + x64), Linux and Windows, then drafts
+# a GitHub Release with the bundles attached.
+#
+# IMPORTANT: the pushed tag must match the version in src-tauri/tauri.conf.json
+# (currently "0.1.0"), e.g. push tag `v0.1.0` to release that version. Tauri
+# reads the app version from tauri.conf.json, and `tauri-action` uses the
+# `__VERSION__` placeholder below to fill in the release name/tag from that
+# same value.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest # Apple Silicon (M1 and later)
+            target: aarch64-apple-darwin
+          - platform: macos-latest # Intel
+            target: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: ''
+          - platform: windows-latest
+            target: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Only macOS runners need both Apple targets; harmless no-op elsewhere.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: 'src-tauri -> target'
+
+      # Current Tauri v2 Debian/Ubuntu dependency list per
+      # https://v2.tauri.app/start/prerequisites/#linux (Debian tab).
+      # Uses libayatana-appindicator3-dev (not the legacy libappindicator3-dev)
+      # and libwebkit2gtk-4.1-dev (not 4.0, which is Tauri v1). `patchelf` is
+      # no longer listed as required for v2 builds.
+      - name: install Linux dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      # tauri-action auto-detects the package manager from the lockfile
+      # (bun.lock is present, so it runs `bun tauri build`, which in turn
+      # runs beforeBuildCommand "bun run build" from tauri.conf.json).
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # --- Code signing / notarization (not configured) ---
+          # Uncomment and add these as repo/org secrets to enable signed,
+          # notarized macOS builds and signed Windows builds.
+          #
+          # macOS signing + notarization:
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          #
+          # Tauri updater / Windows signing:
+          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: 'Agent Deck v__VERSION__'
+          releaseBody: 'See the assets below to download this version and install.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.target != '' && format('--target {0}', matrix.target) || '' }}
