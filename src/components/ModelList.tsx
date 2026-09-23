@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, Plus, Search, Trash2, XCircle, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ModelPickerDialog } from "@/components/ModelPickerDialog";
+import { useT } from "@/i18n";
 import type { ModelTestResult, OcModel } from "@/lib/api";
 import { modelTest, modelsFetch } from "@/lib/api";
 import {
@@ -32,6 +33,7 @@ const DraftRow = ({
   onAdd: (model: OcModel) => void;
   onCancel: () => void;
 }) => {
+  const t = useT();
   const [draft, setDraft] = useState<OcModel>(blankModel());
   const limitsOk = draft.contextLimit !== null && draft.outputLimit !== null;
   const valid = draft.id.trim() !== "" && limitsOk;
@@ -55,21 +57,19 @@ const DraftRow = ({
   return (
     <div className="flex flex-col gap-2.5 rounded-md border border-busy/40 bg-surface-2 p-3">
       <div className="grid grid-cols-2 gap-2.5">
-        {field("ID model *", "id")}
-        {field("Nama tampilan", "name")}
-        {field("Context limit *", "contextLimit", true)}
-        {field("Output limit *", "outputLimit", true)}
+        {field(t("modelList.idLabel"), "id")}
+        {field(t("modelList.displayNameLabel"), "name")}
+        {field(t("modelList.contextLimitLabel"), "contextLimit", true)}
+        {field(t("modelList.outputLimitLabel"), "outputLimit", true)}
       </div>
-      <span className="text-[11px] text-fg-3">
-        Limit wajib diisi. Kalau kosong, opencode menganggapnya 0 dan model tidak jalan.
-      </span>
+      <span className="text-[11px] text-fg-3">{t("modelList.limitsRequired")}</span>
       <div className="flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
           className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-1.5 text-[12px] text-fg-2 hover:border-fg-3 hover:text-fg"
         >
-          Batal
+          {t("common.cancel")}
         </button>
         <button
           type="button"
@@ -84,21 +84,27 @@ const DraftRow = ({
           }
           className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-3 py-1.5 text-[12px] font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
         >
-          Tambah
+          {t("common.add")}
         </button>
       </div>
     </div>
   );
 };
 
-const TestResult = ({ result }: { result: ModelTestResult }) => (
-  <span className={`flex items-center gap-1.5 font-mono text-[11px] ${result.ok ? "text-ok" : "text-err"}`}>
-    {result.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-    {result.ok ? `ok ${result.latencyMs}ms` : (result.error ?? `HTTP ${result.status ?? "?"}`)}
-  </span>
-);
+const TestResult = ({ result }: { result: ModelTestResult }) => {
+  const t = useT();
+  return (
+    <span className={`flex items-center gap-1.5 font-mono text-[11px] ${result.ok ? "text-ok" : "text-err"}`}>
+      {result.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+      {result.ok
+        ? t("modelList.testOk", { ms: result.latencyMs })
+        : (result.error ?? t("modelList.httpStatus", { status: result.status ?? "?" }))}
+    </span>
+  );
+};
 
 export const ModelList = ({ providerId, providerReady, models, onChange }: ModelListProps) => {
+  const t = useT();
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -122,7 +128,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
     onSuccess: (ids) => {
       setAddError(null);
       if (ids.length === 0) {
-        setAddError("Endpoint tidak mengembalikan model.");
+        setAddError(t("modelList.noModelsReturned"));
         setFetched(null);
         return;
       }
@@ -164,7 +170,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
     const context = Number(limitContext);
     const output = Number(limitOutput);
     if (limitContext.trim() === "" || limitOutput.trim() === "" || !(context > 0) || !(output > 0)) {
-      setLimitError("Harus angka lebih dari 0");
+      setLimitError(t("modelList.mustBePositive"));
       return;
     }
     onChange(applyLimits(models, selected, { context, output }));
@@ -187,7 +193,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari model"
+            placeholder={t("modelList.searchPlaceholder")}
             className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-fg outline-none"
           />
         </div>
@@ -198,7 +204,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
           className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
         >
           {fetchModels.isPending ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-          Ambil dari /v1/models
+          {t("modelList.fetchFromEndpoint")}
         </button>
         <button
           type="button"
@@ -206,13 +212,13 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
           className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
         >
           <Plus size={14} />
-          Model manual
+          {t("modelList.manualModel")}
         </button>
       </div>
 
       {(!providerReady || fetchModels.isPending) && (
         <span className="text-[11.5px] text-fg-3">
-          {fetchModels.isPending ? "Mengambil daftar model…" : "Simpan provider dulu sebelum mengambil model."}
+          {fetchModels.isPending ? t("modelList.fetchingList") : t("modelList.saveProviderFirst")}
         </span>
       )}
 
@@ -224,36 +230,45 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
 
       {missingLimit > 0 && (
         <span className="text-[11.5px] text-waiting">
-          {missingLimit} model belum punya limit yang sah. Pilih lalu "Isi default" atau "Set limit".
+          {t(missingLimit === 1 ? "modelList.missingLimit.one" : "modelList.missingLimit.other", { n: missingLimit })}
         </span>
       )}
 
       {selected.length > 0 && (
         <div className="flex flex-col gap-2.5 rounded-md border border-busy/40 bg-surface-2 px-3 py-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[12px] font-medium text-fg">{selected.length} dipilih</span>
+            <span className="text-[12px] font-medium text-fg">
+              {t("modelList.selectedCount", { n: selected.length })}
+            </span>
             <button
               type="button"
               onClick={() => (settingLimits ? setSettingLimits(false) : openLimitForm())}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg"
             >
-              Set limit
+              {t("modelList.setLimit")}
             </button>
             <button
               type="button"
               onClick={() => bulk(applyDefaultLimits(models, selected))}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg"
             >
-              Isi default
+              {t("modelList.fillDefaults")}
             </button>
             <button
               type="button"
               onClick={() => {
-                if (confirm(`Hapus ${selected.length} model dari daftar?`)) bulk(removeSelected(models, selected));
+                if (
+                  confirm(
+                    t(selected.length === 1 ? "modelList.confirmDelete.one" : "modelList.confirmDelete.other", {
+                      n: selected.length,
+                    }),
+                  )
+                )
+                  bulk(removeSelected(models, selected));
               }}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:border-err/60 hover:text-err"
             >
-              Hapus
+              {t("common.delete")}
             </button>
             <button
               type="button"
@@ -263,15 +278,15 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
               }}
               className="ad-interactive ad-press cursor-pointer rounded-md px-2.5 py-1 text-[11.5px] text-fg-3 hover:text-fg"
             >
-              Batal pilih
+              {t("modelList.clearSelection")}
             </button>
             <span className="text-[11px] text-fg-3">{DEFAULT_LIMITS_NOTE}</span>
           </div>
-          <span className="text-[11px] text-fg-3">Model hanya dihapus dari config, bukan dari provider.</span>
+          <span className="text-[11px] text-fg-3">{t("modelList.deleteConfigOnly")}</span>
           {settingLimits && (
             <div className="flex flex-wrap items-end gap-2.5">
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-fg-3">Context</span>
+                <span className="text-[11px] text-fg-3">{t("modelList.contextLabel")}</span>
                 <input
                   value={limitContext}
                   inputMode="numeric"
@@ -280,7 +295,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-fg-3">Output</span>
+                <span className="text-[11px] text-fg-3">{t("modelList.outputLabel")}</span>
                 <input
                   value={limitOutput}
                   inputMode="numeric"
@@ -293,7 +308,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
                 onClick={applyLimitForm}
                 className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-3 py-1.5 text-[12px] font-semibold text-bg hover:opacity-90"
               >
-                Terapkan
+                {t("modelList.apply")}
               </button>
               {limitError !== null && <span className="text-[11px] text-err">{limitError}</span>}
             </div>
@@ -326,7 +341,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
       <div className="min-h-0 flex-1 overflow-y-auto rounded-[10px] border border-border bg-surface px-4 py-2">
         {rows.length === 0 ? (
           <div className="py-10 text-center text-sm text-fg-3">
-            {models.length === 0 ? "Belum ada model." : "Tidak ada model yang cocok."}
+            {models.length === 0 ? t("modelList.noModelsYet") : t("modelList.noModelsMatch")}
           </div>
         ) : (
           <table className="w-full border-collapse">
@@ -344,9 +359,13 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
                     className="size-3.5 cursor-pointer accent-busy disabled:cursor-default disabled:opacity-45"
                   />
                 </th>
-                <th className="pb-2.5 text-left text-[11px] font-medium text-fg-3">Model</th>
-                <th className="pb-2.5 text-right text-[11px] font-medium text-fg-3">Context</th>
-                <th className="pb-2.5 text-right text-[11px] font-medium text-fg-3">Output</th>
+                <th className="pb-2.5 text-left text-[11px] font-medium text-fg-3">{t("modelList.headerModel")}</th>
+                <th className="pb-2.5 text-right text-[11px] font-medium text-fg-3">
+                  {t("modelList.contextLabel")}
+                </th>
+                <th className="pb-2.5 text-right text-[11px] font-medium text-fg-3">
+                  {t("modelList.outputLabel")}
+                </th>
                 <th />
                 <th />
               </tr>
@@ -373,16 +392,16 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
                       </div>
                     </td>
                     <td className="py-2.5 pr-4 text-right font-mono text-[12px] text-fg-2">
-                      {model.contextLimit ?? <span className="text-waiting">belum diisi</span>}
+                      {model.contextLimit ?? <span className="text-waiting">{t("modelList.notFilled")}</span>}
                     </td>
                     <td className="py-2.5 pr-4 text-right font-mono text-[12px] text-fg-2">
-                      {model.outputLimit ?? <span className="text-waiting">belum diisi</span>}
+                      {model.outputLimit ?? <span className="text-waiting">{t("modelList.notFilled")}</span>}
                     </td>
                     <td className="py-2.5 pr-3 text-right">
                       {busy ? (
                         <span className="flex items-center gap-1.5 text-[11px] text-fg-3">
                           <Loader2 size={12} className="animate-spin" />
-                          tes…
+                          {t("modelList.testing")}
                         </span>
                       ) : result ? (
                         <TestResult result={result} />
@@ -396,7 +415,7 @@ export const ModelList = ({ providerId, providerReady, models, onChange }: Model
                           onClick={() => test.mutate(model.id)}
                           className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
                         >
-                          Tes
+                          {t("modelList.test")}
                         </button>
                         <button
                           type="button"

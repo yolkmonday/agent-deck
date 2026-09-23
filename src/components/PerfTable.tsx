@@ -52,7 +52,7 @@ const Row = ({
   return (
     <tr
       onClick={() => onSelect(row.key)}
-      title={lowSamples ? "Sampel sedikit" : undefined}
+      title={lowSamples ? t("perfTable.lowSamples") : undefined}
       className={`cursor-pointer border-b border-border/60 last:border-0 ${lowSamples ? "opacity-50" : ""} ${selected ? "bg-surface-2" : ""}`}
     >
       <td className={`py-3 ${depth > 0 ? "pl-6" : ""}`}>
@@ -98,6 +98,7 @@ export const PerfTable = ({
   selected: string[];
   onSelect: (key: string) => void;
 }) => {
+  const t = useT();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const onToggleExpand = (key: string) =>
@@ -112,11 +113,11 @@ export const PerfTable = ({
     <table className="w-full border-collapse">
       <thead>
         <tr className="border-b border-border">
-          <th className="pb-2.5 text-left text-[11px] font-medium text-fg-3">Model</th>
-          <SortHead sortKey="tpsP50" sort={sort} onSort={onSort}>TPS p50</SortHead>
-          <SortHead sortKey="tpsP10" sort={sort} onSort={onSort}>TPS p10</SortHead>
-          <SortHead sortKey="ttftP50Ms" sort={sort} onSort={onSort}>TTFT p50</SortHead>
-          <SortHead sortKey="samples" sort={sort} onSort={onSort}>Sampel</SortHead>
+          <th className="pb-2.5 text-left text-[11px] font-medium text-fg-3">{t("perfTable.model")}</th>
+          <SortHead sortKey="tpsP50" sort={sort} onSort={onSort}>{t("perfTable.tpsP50")}</SortHead>
+          <SortHead sortKey="tpsP10" sort={sort} onSort={onSort}>{t("perfTable.tpsP10")}</SortHead>
+          <SortHead sortKey="ttftP50Ms" sort={sort} onSort={onSort}>{t("perfTable.ttftP50")}</SortHead>
+          <SortHead sortKey="samples" sort={sort} onSort={onSort}>{t("perfTable.samples")}</SortHead>
         </tr>
       </thead>
       <tbody>

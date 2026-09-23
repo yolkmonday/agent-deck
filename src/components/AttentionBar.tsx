@@ -2,6 +2,7 @@ import { Settings } from "lucide-react";
 import { useState } from "react";
 import { RecoverMenu } from "@/components/RecoverMenu";
 import { SettingsPopover } from "@/components/SettingsPopover";
+import { useT } from "@/i18n";
 import type { AttentionMode, Settings as SettingsValue } from "@/lib/api";
 import type { Orphan, Session } from "@/lib/types";
 import { healthLabel, orphanLabel, waitingLabel } from "@/lib/attention";
@@ -29,6 +30,7 @@ export const AttentionBar = ({
   onNotifySound: (enabled: boolean) => void;
   onMinutes: (value: { stallMinutes: number; slowToolMinutes: number }) => void;
 }) => {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const first = sessions[0];
   const bad = unhealthy[0];
@@ -54,7 +56,9 @@ export const AttentionBar = ({
         <span className={`truncate text-[13px] font-semibold ${tone === "waiting" ? "text-waiting" : "text-err"}`}>
           {text}
         </span>
-        {extra > 0 && <span className="shrink-0 text-[12.5px] text-fg-2">dan {extra} lainnya</span>}
+        {extra > 0 && (
+          <span className="shrink-0 text-[12.5px] text-fg-2">{t("attentionBar.andMore", { n: extra })}</span>
+        )}
         {jumpable && (
           <button
             type="button"
@@ -63,7 +67,7 @@ export const AttentionBar = ({
               tone === "waiting" ? "bg-waiting" : "bg-err"
             }`}
           >
-            Buka
+            {t("attentionBar.open")}
           </button>
         )}
         {!first && bad && bad.health === "stalled" && (
@@ -73,7 +77,7 @@ export const AttentionBar = ({
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            title="Pengaturan notifikasi"
+            title={t("attentionBar.notificationSettings")}
             className="ad-interactive ad-press cursor-pointer rounded-md border border-border p-1.5 text-fg-2 hover:border-fg-3 hover:text-fg"
           >
             <Settings size={14} />

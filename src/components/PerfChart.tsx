@@ -1,4 +1,5 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useT } from "@/i18n";
 import { chartSeries, flattenOneLevel } from "@/lib/perf";
 import type { PerfAgg } from "@/lib/api";
 
@@ -31,9 +32,11 @@ const TooltipBox = ({
 };
 
 export const PerfChart = ({ rows, keys }: { rows: PerfAgg[]; keys: string[] }) => {
+  const t = useT();
   const data = chartSeries(rows, keys);
   const byKey = flattenOneLevel(rows);
-  if (data.length === 0) return <div className="flex h-64 items-center justify-center text-sm text-fg-3">Belum ada data.</div>;
+  if (data.length === 0)
+    return <div className="flex h-64 items-center justify-center text-sm text-fg-3">{t("perfChart.noData")}</div>;
 
   return (
     <div className="h-64 w-full">

@@ -1,14 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { Icon } from "@iconify/react";
+import { useT, type MessageKey } from "@/i18n";
 import { billingSummary, type AccountPeriod } from "@/lib/api";
 import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
 import { formatTokens, totalTokens } from "@/lib/format";
 import type { BillingMode } from "@/lib/types";
 
-const modeLabel: Record<BillingMode, string> = {
-  subscription: "Langganan",
-  prepaid: "Prabayar",
-  payg: "Per token",
+const modeLabel: Record<BillingMode, MessageKey> = {
+  subscription: "monthlySummary.modeSubscription",
+  prepaid: "monthlySummary.modePrepaid",
+  payg: "monthlySummary.modePayg",
 };
 
 const modeTone: Record<BillingMode, string> = {
@@ -31,6 +32,7 @@ const Progress = ({ left, total }: { left: number; total: number }) => {
 
 /** The one number that matters for this mode, and the period it covers. */
 const Figure = ({ p }: { p: AccountPeriod }) => {
+  const t = useT();
   if (p.expired) {
     return <span className="font-mono text-[12.5px] text-fg-3">{formatUsd(p.spendUsd)}</span>;
   }
@@ -38,13 +40,17 @@ const Figure = ({ p }: { p: AccountPeriod }) => {
     return (
       <span className="flex items-baseline gap-2 whitespace-nowrap">
         <span className="font-mono text-[12.5px] font-semibold text-fg">
-          {formatUsd(p.committedUsd ?? 0)}/bln
+          {t("monthlySummary.perMonth", { value: formatUsd(p.committedUsd ?? 0) })}
         </span>
         <span className="text-[11.5px] text-fg-3">
-          {p.daysLeft === null ? "aktif" : `sisa ${p.daysLeft} hari`}
+          {p.daysLeft === null
+            ? t("monthlySummary.active")
+            : t(p.daysLeft === 1 ? "monthlySummary.daysLeft.one" : "monthlySummary.daysLeft.other", {
+                n: p.daysLeft,
+              })}
         </span>
         <span className="font-mono text-[11.5px] text-fg-3" title={NOTIONAL_HINT}>
-          {formatNotional(p.notionalUsd)} setara API
+          {t("monthlySummary.apiEquivalent", { value: formatNotional(p.notionalUsd) })}
         </span>
       </span>
     );
@@ -53,22 +59,30 @@ const Figure = ({ p }: { p: AccountPeriod }) => {
     return (
       <span className="flex items-baseline gap-2 whitespace-nowrap">
         <span className="font-mono text-[12.5px] font-semibold text-fg">
-          sisa {formatUsd(p.creditLeftUsd ?? 0)} dari {formatUsd((p.creditLeftUsd ?? 0) + p.spendUsd)}
+          {t("monthlySummary.creditLeftOf", {
+            left: formatUsd(p.creditLeftUsd ?? 0),
+            total: formatUsd((p.creditLeftUsd ?? 0) + p.spendUsd),
+          })}
         </span>
         <span className="text-[11.5px] text-fg-3">
-          {p.daysLeft === null ? "tanpa kedaluwarsa" : `habis ${p.daysLeft} hari lagi`}
+          {p.daysLeft === null
+            ? t("monthlySummary.noExpiry")
+            : t(p.daysLeft === 1 ? "monthlySummary.expiresIn.one" : "monthlySummary.expiresIn.other", {
+                n: p.daysLeft,
+              })}
         </span>
       </span>
     );
   }
   return (
     <span className="font-mono text-[12.5px] font-semibold whitespace-nowrap text-fg">
-      {formatUsd(p.spendUsd)} bulan ini
+      {t("monthlySummary.spentThisMonth", { value: formatUsd(p.spendUsd) })}
     </span>
   );
 };
 
 export const MonthlySummary = () => {
+  const t = useT();
   const query = useQuery({ queryKey: ["billing", "summary"], queryFn: billingSummary });
   const periods = query.data?.periods ?? [];
 
@@ -78,12 +92,12 @@ export const MonthlySummary = () => {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold">Tagihan per akun</span>
+        <span className="text-sm font-semibold">{t("monthlySummary.title")}</span>
         <span className="text-xs text-fg-3">
           {query.data.warnings.length > 0 ? (
             <span className="text-waiting">{query.data.warnings.join(" · ")}</span>
           ) : (
-            `Siklus tagihan masing-masing akun · ${formatUsd(query.data.totalSpendUsd)} keluar`
+            t("monthlySummary.cycleSummary", { total: formatUsd(query.data.totalSpendUsd) })
           )}
         </span>
       </div>
@@ -98,12 +112,12 @@ export const MonthlySummary = () => {
                 <span
                   className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${modeTone[p.mode]}`}
                 >
-                  {modeLabel[p.mode]}
+                  {t(modeLabel[p.mode])}
                 </span>
                 {p.expired && (
                   <span className="flex shrink-0 items-center gap-1 rounded-full bg-err/15 px-2 py-0.5 text-[10.5px] font-semibold text-err">
                     <Icon icon="lucide:octagon-alert" width={11} height={11} />
-                    Sudah lewat tanggal
+                    {t("monthlySummary.expired")}
                   </span>
                 )}
               </span>
@@ -113,7 +127,11 @@ export const MonthlySummary = () => {
               <span className="font-mono">
                 {p.fromDate} → {p.toDate}
               </span>
-              <span className="font-mono">{formatTokens(totalTokens(p.tokens))} token</span>
+              <span className="font-mono">
+                {t(totalTokens(p.tokens) === 1 ? "monthlySummary.tokensCount.one" : "monthlySummary.tokensCount.other", {
+                  value: formatTokens(totalTokens(p.tokens)),
+                })}
+              </span>
             </div>
             {p.mode === "prepaid" && (
               <Progress left={p.creditLeftUsd ?? 0} total={(p.creditLeftUsd ?? 0) + p.spendUsd} />

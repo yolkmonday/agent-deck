@@ -1,4 +1,5 @@
 import { AgentIcon, ModelIcon } from "@/components/BrandIcon";
+import { useT } from "@/i18n";
 import type { ModelRow } from "@/lib/api";
 import { formatUsd } from "@/lib/cost";
 import { formatTokens } from "@/lib/format";
@@ -22,18 +23,20 @@ const Head = ({ children, right = false }: { children: string; right?: boolean }
 );
 
 export const ModelTable = ({ rows }: { rows: ModelRow[] }) => {
+  const t = useT();
   const sorted = [...rows].sort((a, b) => b.costUsd - a.costUsd);
   const max = sorted.reduce((acc, r) => Math.max(acc, r.costUsd), 0);
+  const totalMessages = sorted.reduce((acc, r) => acc + r.messages, 0);
   return (
     <table className="w-full border-collapse">
       <thead>
         <tr className="border-b border-border">
-          <Head>Model</Head>
-          <Head>Agent</Head>
-          <Head right>Input</Head>
-          <Head right>Output</Head>
-          <Head right>Cache</Head>
-          <Head right>Biaya</Head>
+          <Head>{t("modelTable.headerModel")}</Head>
+          <Head>{t("modelTable.headerAgent")}</Head>
+          <Head right>{t("modelTable.headerInput")}</Head>
+          <Head right>{t("modelTable.headerOutput")}</Head>
+          <Head right>{t("modelTable.headerCache")}</Head>
+          <Head right>{t("modelTable.headerCost")}</Head>
         </tr>
       </thead>
       <tbody>
@@ -73,10 +76,10 @@ export const ModelTable = ({ rows }: { rows: ModelRow[] }) => {
       </tbody>
       <tfoot>
         <tr className="border-t border-border">
-          <td className="pt-3 text-[12.5px] font-semibold text-fg-2">Total</td>
+          <td className="pt-3 text-[12.5px] font-semibold text-fg-2">{t("modelTable.total")}</td>
           <td />
           <td colSpan={3} className="pt-3 text-right text-[11.5px] text-fg-3">
-            {sorted.reduce((acc, r) => acc + r.messages, 0)} pesan
+            {t(totalMessages === 1 ? "modelTable.messages.one" : "modelTable.messages.other", { n: totalMessages })}
           </td>
           <td className="pt-3 text-right font-mono text-[12.5px] font-semibold text-fg">
             {formatUsd(sorted.reduce((acc, r) => acc + r.costUsd, 0))}

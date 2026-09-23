@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, KeyRound, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useT } from "@/i18n";
 import { secretClear, secretReveal, secretSet } from "@/lib/api";
 
 const REVEAL_MS = 15_000;
@@ -12,6 +13,7 @@ interface KeyFieldProps {
 }
 
 export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) => {
+  const t = useT();
   const qc = useQueryClient();
   const [revealed, setRevealed] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -61,13 +63,13 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
     onError: (e) => setError(String(e)),
   });
 
-  const shown = revealed ?? keyMasked ?? "belum ada key";
+  const shown = revealed ?? keyMasked ?? t("keyField.noKey");
 
   return (
     <div className="flex flex-col gap-2">
       <span className="flex items-center gap-1.5 text-xs text-fg-3">
         <KeyRound size={13} />
-        API key
+        {t("keyField.apiKey")}
       </span>
 
       <div className="flex items-center gap-2">
@@ -84,7 +86,7 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
               remask();
             }
           }}
-          placeholder={editing ? "Tempel key baru" : undefined}
+          placeholder={editing ? t("keyField.pastePlaceholder") : undefined}
           className={`min-w-0 flex-1 rounded-md border bg-bg px-3 py-2 font-mono text-xs text-fg outline-none ${
             editing ? "border-busy" : "border-border"
           }`}
@@ -93,7 +95,7 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
         {!editing && keyMasked !== null && (
           <button
             type="button"
-            title="Tampilkan 15 detik"
+            title={t("keyField.revealTitle")}
             onClick={() => (revealed === null ? reveal.mutate() : remask())}
             className="ad-interactive ad-press cursor-pointer rounded-md border border-border p-2 text-fg-3 hover:bg-surface-2 hover:text-fg"
           >
@@ -109,7 +111,7 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
               onClick={() => save.mutate(draft.trim())}
               className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-3 py-2 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
             >
-              {save.isPending ? "Menyimpan…" : "Simpan"}
+              {save.isPending ? t("keyField.saving") : t("common.save")}
             </button>
             <button
               type="button"
@@ -119,7 +121,7 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
               }}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-2 text-xs text-fg-2 hover:border-fg-3 hover:text-fg"
             >
-              Batal
+              {t("common.cancel")}
             </button>
           </>
         ) : (
@@ -132,12 +134,12 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
               }}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-2 text-xs text-fg-2 hover:border-fg-3 hover:text-fg"
             >
-              {keyMasked === null ? "Isi key" : "Ganti"}
+              {keyMasked === null ? t("keyField.fillKey") : t("keyField.changeKey")}
             </button>
             {keyMasked !== null && (
               <button
                 type="button"
-                title="Hapus key"
+                title={t("keyField.deleteKeyTitle")}
                 disabled={clear.isPending}
                 onClick={() => clear.mutate()}
                 className="ad-interactive ad-press cursor-pointer rounded-md border border-border p-2 text-fg-3 hover:bg-err/10 hover:text-err disabled:cursor-default disabled:opacity-45"
@@ -150,13 +152,11 @@ export const KeyField = ({ providerId, keyMasked, keyInline }: KeyFieldProps) =>
       </div>
 
       {keyInline && (
-        <span className="text-[11.5px] text-waiting">
-          Key ini masih plaintext di config. Pakai tombol di halaman sebelah untuk memindahkannya.
-        </span>
+        <span className="text-[11.5px] text-waiting">{t("keyField.plaintextWarning")}</span>
       )}
 
       {revealed !== null && (
-        <span className="text-[11.5px] text-fg-3">Key disembunyikan lagi dalam 15 detik.</span>
+        <span className="text-[11.5px] text-fg-3">{t("keyField.hiddenAgain")}</span>
       )}
 
       {error !== null && (
