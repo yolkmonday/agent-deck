@@ -38,12 +38,29 @@ export const filterPerf = (rows: PerfAgg[], q: string): PerfAgg[] => {
   return needle === "" ? rows : rows.filter((r) => matches(r, needle));
 };
 
+// Flatten one level (top-level rows + their direct children) so a key can be matched
+// whether it belongs to a family row or one of its children in grouped mode. A key
+// present at both levels keeps the first occurrence (top-level rows are visited first).
+const flattenOneLevel = (rows: PerfAgg[]): Map<string, PerfAgg> => {
+  const byKey = new Map<string, PerfAgg>();
+  for (const r of rows) {
+    if (!byKey.has(r.key)) byKey.set(r.key, r);
+    for (const c of r.children) {
+      if (!byKey.has(c.key)) byKey.set(c.key, c);
+    }
+  }
+  return byKey;
+};
+
 export const chartSeries = (rows: PerfAgg[], keys: string[]): Array<Record<string, string | number>> => {
+  const byKey = flattenOneLevel(rows);
   const byDay = new Map<string, Record<string, string | number>>();
-  for (const r of rows.filter((x) => keys.includes(x.key))) {
+  for (const key of keys) {
+    const r = byKey.get(key);
+    if (!r) continue;
     for (const d of r.daily) {
       const point = byDay.get(d.day) ?? { day: d.day };
-      point[r.key] = d.tpsP50;
+      point[key] = d.tpsP50;
       byDay.set(d.day, point);
     }
   }

@@ -46,4 +46,11 @@ describe("chartSeries", () => {
       { day: "2026-09-22", a: 12, b: 30 },
     ]);
   });
+
+  it("matches a selected key against a grouped row's children", () => {
+    const child1 = { ...row("c1", 1, null), daily: [{ day: "2026-09-21", tpsP50: 5 }] };
+    const child2 = { ...row("c2", 1, null), daily: [{ day: "2026-09-21", tpsP50: 8 }] };
+    const family = { ...row("family", 1, null), children: [child1, child2] };
+    expect(chartSeries([family], ["c1"])).toEqual([{ day: "2026-09-21", c1: 5 }]);
+  });
 });
