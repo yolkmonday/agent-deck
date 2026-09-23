@@ -23,34 +23,36 @@ CREATE TABLE IF NOT EXISTS response_perf (
   agent         TEXT NOT NULL,     -- claude | opencode | codex
   session_id    TEXT NOT NULL,
   model         TEXT NOT NULL,     -- same model string the message table uses (provider/model for opencode)
-  ts_ms         INTEGER NOT NULL,  -- response end time
+  start_ms      INTEGER NOT NULL,  -- generation window start (request anchor for estimated samples)
+  end_ms        INTEGER NOT NULL,  -- response end time
+  gen_ms        INTEGER NOT NULL,  -- generation time (for opencode: sum of timed part durations, not end-start)
   output_tokens INTEGER NOT NULL,  -- output + reasoning
-  gen_ms        INTEGER NOT NULL,  -- generation window
   ttft_ms       INTEGER,           -- NULL when unknown
   precise       INTEGER NOT NULL   -- 1 = measured from stream timing, 0 = estimated
 );
-CREATE INDEX IF NOT EXISTS response_perf_ts ON response_perf (ts_ms);
+CREATE INDEX IF NOT EXISTS response_perf_end ON response_perf (end_ms);
 ```
 
 Samples are written by the same incremental passes that already fill `message`, reusing their file-progress / mtime cache. `delete_session` also deletes that session's perf rows.
 
 ### 3.1 Sample extraction per agent
 
-- **opencode (precise).** One sample per assistant step, built from the `part` table:
-  - A step runs from `step-start` to `step-finish`. The step's output tokens come from the `step-finish` tokens, or the message tokens when a message has a single step.
-  - `ttft_ms` = first `text`/`reasoning` part `time.start` − step start.
-  - `gen_ms` = step end − first `text`/`reasoning` part `time.start`.
-  - If step boundaries have no timestamps, fall back to the message: `ttft` = first part start − `time.created`, and `gen` = `time.completed` − first part start.
-  - The implementer verifies against real rows (read-only sqlite on `~/.local/share/opencode/opencode.db`, `part` and `message` tables only) and documents the rule used in a code comment.
+- **opencode (precise).** Verified against real data (2026-09-23): `step-start`/`step-finish` parts carry NO time inside `data`; `step-finish.data.tokens` has `output`/`reasoning`; a step window also contains tool *execution* time, so end−start overstates generation. Rule, one sample per step (a step = parts of one message between a `step-start` and the next `step-finish`, ordered by `part.time_created`):
+  - `output_tokens` = step-finish `tokens.output + tokens.reasoning`.
+  - `gen_ms` = Σ over `text`/`reasoning` parts of (`data.time.end − data.time.start`) + Σ over `tool` parts of (`data.state.time.start − part.time_created`) (the tool-input streaming time, clamped ≥ 0).
+  - `ttft_ms` = (earliest of text/reasoning `data.time.start` and tool `part.time_created`) − step-start `part.time_created`, clamped ≥ 0.
+  - `start_ms` = step-start `part.time_created`, `end_ms` = step-finish `part.time_created`. id = `opencode:{step-finish part id}`. `precise` = 1.
+  - A step with no timed parts is skipped.
 - **Claude Code (estimated).**
-  - One sample per assistant `message.id`. The jsonl splits one API message into several records with the same `message.id`.
-  - The window runs from the timestamp of the record before that message's first record to the timestamp of its last record. The previous record is the user prompt or the tool_result.
-  - `output_tokens` = `usage.output_tokens`, counted once per `message.id` using the existing dedupe.
-  - `ttft_ms` = NULL, `precise` = 0.
+  - One sample per assistant `message.id`. The jsonl splits one API message into several records with the same `message.id`, each carrying the same cumulative `usage.output_tokens`.
+  - `start_ms` = timestamp of the latest non-assistant record (user prompt or tool_result) seen before that message's first record in the same read pass. None seen in this pass → skip the sample.
+  - `end_ms` = timestamp of its last record. Upsert merges: keep the first `start_ms`, take `MAX(end_ms)` and the latest `output_tokens`, recompute `gen_ms = end_ms − start_ms`.
+  - id = `claude:{message.id}`, `ttft_ms` = NULL, `precise` = 0.
 - **Codex (estimated).**
-  - One sample per `event_msg` `token_count` that has `info.last_token_usage.output_tokens`, counting reasoning tokens as well if present.
-  - The window runs from the previous request boundary to the `token_count` timestamp. The boundary is the latest `function_call_output`, user `message` or `task_started` before it.
-  - `ttft_ms` = NULL, `precise` = 0.
+  - One sample per `event_msg` `token_count` that has `info.last_token_usage.output_tokens` (+ `reasoning_output_tokens` if present).
+  - `start_ms` = latest request boundary seen in the same read pass before it: `response_item` `function_call_output`, `response_item` `message` with role `user`, or `event_msg` `task_started`. None → skip.
+  - `end_ms` = the `token_count` timestamp, `gen_ms = end_ms − start_ms`.
+  - id = `codex:{file stem}:{end_ms}` (not the message row's per-pass ordinal), `ttft_ms` = NULL, `precise` = 0.
 
 ### 3.2 Noise filter
 
@@ -107,4 +109,4 @@ Command `perf_by_model(range: "24h" | "7d" | "30d", group_by_family: bool)` retu
 
 ## 7. Open items
 
-- The exact opencode step boundary fields are verified during implementation (§3.1).
+- None blocking. Samples whose anchor falls in a previous incremental read pass are skipped (rare; windows are seconds long).
