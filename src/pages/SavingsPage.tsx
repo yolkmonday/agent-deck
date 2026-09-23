@@ -78,7 +78,7 @@ export const SavingsPage = () => {
   const empty = !isPending && !isError && daily.length === 0 && topCommands.length === 0;
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
         <div className="flex flex-col gap-0.75">
           <h1 className="text-[22px] font-semibold">{t("savingsPage.title")}</h1>

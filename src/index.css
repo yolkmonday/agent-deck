@@ -28,6 +28,8 @@
 }
 
 html, body, #root { height: 100%; }
+/* Desktop shell: only the page panes scroll, never the document (keeps the sidebar fixed). */
+html, body { overflow: hidden; overscroll-behavior: none; }
 body { background: var(--color-bg); color: var(--color-fg); font-family: var(--font-sans); }
 
 /* Every interactive surface answers the pointer in the same way. */
