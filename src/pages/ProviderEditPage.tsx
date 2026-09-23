@@ -9,6 +9,7 @@ import { configBackups, configRestore, modelsOverview, secretMigrateInline } fro
 import { providerDelete, providerSave } from "@/lib/api";
 import { incompleteModels } from "@/lib/models";
 import { useNavigate } from "@/lib/nav";
+import { isDraftDirty } from "@/lib/provider-draft";
 
 const field =
   "rounded-md border border-border bg-bg px-3 py-2 text-[13px] text-fg outline-none focus:border-busy";
@@ -118,19 +119,23 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
   const creating = providerId === null;
 
   const [draft, setDraft] = useState<OcProviderInput | null>(null);
+  const [baseline, setBaseline] = useState<OcProviderInput | null>(null);
   const [backups, setBackups] = useState(false);
   const [savedBackup, setSavedBackup] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [leaveConfirm, setLeaveConfirm] = useState(false);
 
   // Refill the form from the loaded provider whenever the target changes.
   useEffect(() => {
     setDraft(null);
+    setBaseline(null);
+    setLeaveConfirm(false);
   }, [providerId]);
 
   useEffect(() => {
     if (!creating && existing === null) return;
     if (draft !== null) return;
-    setDraft(
+    const initial: OcProviderInput =
       existing === null
         ? {
             id: "",
@@ -151,14 +156,16 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
             customHeaderName: existing.customHeaderName,
             enabled: existing.enabled,
             models: existing.models.map((m) => ({ ...m })),
-          },
-    );
+          };
+    setDraft(initial);
+    setBaseline(initial);
   }, [existing, creating, draft]);
 
   const save = useMutation({
     mutationFn: (input: OcProviderInput) => providerSave(input),
-    onSuccess: async (provider) => {
+    onSuccess: async (provider, input) => {
       setError(null);
+      setBaseline(input);
       const list = await configBackups().catch(() => []);
       setSavedBackup(list[0]?.path ?? null);
       void qc.invalidateQueries({ queryKey: ["models-overview"] });
@@ -215,10 +222,51 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
   const incomplete = incompleteModels(draft.models);
   const limitsIncomplete = incomplete.length > 0;
   const canSave = draft.name.trim() !== "" && idValid && draft.baseUrl.trim() !== "" && !limitsIncomplete;
+  const dirty = baseline !== null && isDraftDirty(draft, baseline);
 
-  const patch = (next: Partial<OcProviderInput>) => setDraft((p) => (p === null ? p : { ...p, ...next }));
+  // Any edit invalidates the last save's success banner and error state, so
+  // they never linger over changes that were never written to config.
+  const patch = (next: Partial<OcProviderInput>) => {
+    setSavedBackup(null);
+    setError(null);
+    setDraft((p) => (p === null ? p : { ...p, ...next }));
+  };
 
   const setModels = (models: OcModel[]) => patch({ models });
+
+  const requestBack = () => {
+    if (dirty && !leaveConfirm) {
+      setLeaveConfirm(true);
+      return;
+    }
+    setLeaveConfirm(false);
+    nav.provider("");
+  };
+
+  const backButton = (
+    <div className="flex items-center gap-2">
+      {leaveConfirm && <span className="text-[11.5px] text-waiting">Perubahan belum disimpan.</span>}
+      <button
+        type="button"
+        onClick={requestBack}
+        className={`ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.75 text-xs font-medium hover:text-fg ${
+          leaveConfirm ? "border-waiting text-waiting" : "border-border text-fg-2"
+        }`}
+      >
+        <ArrowLeft size={14} />
+        {leaveConfirm ? "Buang & kembali" : "Kembali"}
+      </button>
+      {leaveConfirm && (
+        <button
+          type="button"
+          onClick={() => setLeaveConfirm(false)}
+          className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:text-fg"
+        >
+          Batal
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -243,7 +291,7 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
               Pulihkan
             </button>
           )}
-          {back}
+          {backButton}
         </div>
       </header>
 
@@ -390,12 +438,15 @@ export const ProviderEditPage = ({ providerId }: { providerId: string | null }) 
             <div className="flex items-center gap-2 border-t border-border pt-4">
               <button
                 type="button"
-                disabled={!canSave || save.isPending}
+                disabled={!canSave || save.isPending || (!creating && !dirty)}
                 onClick={() => save.mutate(draft)}
                 className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
               >
                 {save.isPending ? "Menyimpan…" : "Simpan"}
               </button>
+              {dirty && !save.isPending && (
+                <span className="text-[11.5px] font-medium text-waiting">Belum disimpan</span>
+              )}
               {!creating && (
                 <button
                   type="button"
