@@ -10,7 +10,7 @@ use collector::billing::{
     cycle_for, days_left, format_date, local_date, parse_date_iso, start_of_day_ms, BillingAccount,
     BillingMode, BillingTable,
 };
-use collector::indexer::{index_claude, index_codex, index_opencode, IndexReport};
+use collector::indexer::{backfill_perf, index_claude, index_codex, index_opencode, IndexReport};
 use collector::health::Thresholds;
 use collector::live::{LiveCollector, Paths};
 use collector::model::{Agent, LiveSnapshot, TokenUsage};
@@ -400,6 +400,10 @@ fn run_index_pass(app: &tauri::AppHandle, state: &Arc<AppState>) -> Result<(), S
     reports.push(index_claude(&mut store, &claude_projects, &home));
     reports.push(index_opencode(&mut store, &paths.opencode_db, &home));
     reports.push(index_codex(&mut store, &codex_sessions, &home));
+    // One-time perf-only backfill for a database that predates perf
+    // tracking; a no-op once `perf_backfilled` is set, so calling it on every
+    // pass (startup and manual reindex alike) is cheap and safe.
+    reports.push(backfill_perf(&mut store, &claude_projects, &codex_sessions, &paths.opencode_db));
     drop(store);
 
     for r in &reports {
@@ -474,6 +478,26 @@ fn history_by_model(days: i64, state: State<'_, Arc<AppState>>) -> Result<Vec<Mo
             messages: r.messages,
         })
         .collect())
+}
+
+#[tauri::command]
+fn perf_by_model(
+    range: String,
+    group_by_family: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<collector::perf::PerfAgg>, String> {
+    let days = match range.as_str() {
+        "24h" => 1,
+        "30d" => 30,
+        _ => 7,
+    };
+    let rows = state
+        .store
+        .lock()
+        .unwrap()
+        .perf_samples(since_ms(days))
+        .map_err(|e| e.to_string())?;
+    Ok(collector::perf::aggregate(&rows, group_by_family))
 }
 
 #[tauri::command]
@@ -1989,6 +2013,7 @@ pub fn run() {
             reindex,
             history_daily,
             history_by_model,
+            perf_by_model,
             history_by_project,
             history_totals,
             timeline_spans,
