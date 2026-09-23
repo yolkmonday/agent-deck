@@ -88,7 +88,7 @@ export const TerminalPage = ({ initialSessionId }: { initialSessionId?: string |
           <div className="min-h-0 flex-1 px-5">
             {sessions.map((s) => (
               <div key={s.id} className={s.id === active.id ? "h-full" : "hidden"}>
-                <TerminalView session={s} />
+                <TerminalView session={s} visible={s.id === active.id} />
               </div>
             ))}
           </div>

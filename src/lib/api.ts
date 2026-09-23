@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import type { Agent, BillingMode, TokenUsage } from "@/lib/types";
 
 export interface IndexStatus {
@@ -348,14 +348,18 @@ export const sessionTail = (sessionId: string, cwd: string, agentId?: string | n
   invoke<TranscriptTail>("session_tail", { sessionId, cwd, agentId: agentId ?? null });
 
 export const termProfiles = () => invoke<TermProfile[]>("term_profiles");
-export const termStart = (profileId: string, cwd: string) =>
-  invoke<TermSession>("term_start", { profileId, cwd });
+export const termStart = (profileId: string, cwd: string, cols: number, rows: number) =>
+  invoke<TermSession>("term_start", { profileId, cwd, cols, rows });
 export const termList = () => invoke<TermSession[]>("term_list");
 export const termWrite = (id: string, data: string) => invoke<null>("term_write", { id, data });
 export const termResize = (id: string, cols: number, rows: number) =>
   invoke<null>("term_resize", { id, cols, rows });
 export const termKill = (id: string) => invoke<null>("term_kill", { id });
-export const termScrollback = (id: string) => invoke<string>("term_scrollback", { id });
+// Streams the session's scrollback + live output as raw bytes over an IPC
+// channel: the backend sends the full scrollback first, then registers the
+// channel for subsequent output, atomically (see TerminalRegistry::attach).
+export const termAttach = (id: string, channel: Channel<ArrayBuffer>) =>
+  invoke<null>("term_attach", { id, channel });
 
 export const recoverNudge = (sessionId: string) =>
   invoke<RecoverResult>("recover_nudge", { sessionId });
