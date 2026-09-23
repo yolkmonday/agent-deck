@@ -25,8 +25,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{Emitter, Manager, State};
-use terminal::{TermDataEvent, TermExitEvent, TermProfile, TermSession, TerminalRegistry};
+use terminal::{TermExitEvent, TermProfile, TermSession, TerminalRegistry};
 
 struct AppState {
     collector: Mutex<LiveCollector>,
@@ -768,27 +769,24 @@ fn term_profiles() -> Vec<TermProfile> {
     TerminalRegistry::profiles()
 }
 
-/// The one place a PTY session is spawned, so a restart wires up its events
-/// exactly like the Terminal page's own button does.
+/// The one place a PTY session is spawned, so a restart wires up its exit
+/// event exactly like the Terminal page's own button does. Output no longer
+/// flows through here: a `term_attach` call registers a channel for it once
+/// the Terminal page actually mounts, which may be well after this returns
+/// (e.g. the recover/restart flow starts a session with nothing watching yet).
 fn start_terminal(
     app: &tauri::AppHandle,
     state: &Arc<AppState>,
     profile_id: &str,
     cwd: &str,
+    cols: u16,
+    rows: u16,
 ) -> Result<TermSession, String> {
     let mut reg = state.terminals.lock().map_err(|e| e.to_string())?;
-    let data_app = app.clone();
     let exit_app = app.clone();
-    reg.start(
-        profile_id,
-        cwd,
-        move |evt: TermDataEvent| {
-            let _ = data_app.emit("term://data", evt);
-        },
-        move |evt: TermExitEvent| {
-            let _ = exit_app.emit("term://exit", evt);
-        },
-    )
+    reg.start(profile_id, cwd, cols, rows, move |evt: TermExitEvent| {
+        let _ = exit_app.emit("term://exit", evt);
+    })
     .map_err(|e| e.to_string())
 }
 
@@ -796,10 +794,37 @@ fn start_terminal(
 fn term_start(
     profile_id: String,
     cwd: String,
+    cols: u16,
+    rows: u16,
     app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
 ) -> Result<TermSession, String> {
-    start_terminal(&app, state.inner(), &profile_id, &cwd)
+    start_terminal(&app, state.inner(), &profile_id, &cwd, cols, rows)
+}
+
+/// Streams a session's output to `channel` as raw bytes (`InvokeResponseBody::Raw`,
+/// so no JSON/base64 encoding overhead on high-volume PTY output). The full
+/// scrollback is sent first, atomically with registering the channel for
+/// subsequent live output — see `TerminalRegistry::attach`. A second attach
+/// for the same session (e.g. remounting the Terminal page) simply replaces
+/// the previous channel.
+#[tauri::command]
+fn term_attach(
+    id: String,
+    channel: Channel<InvokeResponseBody>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state
+        .terminals
+        .lock()
+        .map_err(|e| e.to_string())?
+        .attach(
+            &id,
+            Box::new(move |bytes: &[u8]| {
+                let _ = channel.send(InvokeResponseBody::Raw(bytes.to_vec()));
+            }),
+        )
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -840,15 +865,6 @@ fn term_kill(id: String, state: State<'_, Arc<AppState>>) -> Result<(), String> 
         .map_err(|e| e.to_string())?
         .kill(&id)
         .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn term_scrollback(id: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    Ok(state
-        .terminals
-        .lock()
-        .map_err(|e| e.to_string())?
-        .scrollback(&id))
 }
 
 /// How long an agent gets to flush its transcript after SIGTERM before SIGKILL.
@@ -953,7 +969,9 @@ fn recover_restart(
     if let Err(e) = recover::terminate(pid, &procs, KILL_GRACE_MS) {
         return Ok(RecoverResult::refused("restart", e));
     }
-    match start_terminal(&app, state.inner(), &profile_id, &cwd) {
+    // Real size arrives once the Terminal page mounts and attaches (`term_attach`
+    // + a resize once it fits); until then the PTY just needs a sane default.
+    match start_terminal(&app, state.inner(), &profile_id, &cwd, 80, 24) {
         Ok(session) => Ok(RecoverResult::done(
             "restart",
             format!("Sesi baru dimulai di {cwd}. Percakapan lama tidak ikut pindah."),
@@ -2000,11 +2018,11 @@ pub fn run() {
             billing_summary,
             term_profiles,
             term_start,
+            term_attach,
             term_list,
             term_write,
             term_resize,
             term_kill,
-            term_scrollback,
             recover_nudge,
             recover_kill,
             recover_restart,
