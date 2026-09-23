@@ -20,6 +20,7 @@ const session = (over: Partial<Session> = {}): Session => ({
   groupRoot: "/dev/noor",
   isWorktree: false,
   worktreeName: null,
+  task: null,
   model: "opus",
   branch: "main",
   status: "waiting",

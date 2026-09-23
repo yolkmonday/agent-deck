@@ -12,6 +12,7 @@ const session = (over: Partial<Session> & { id: string }): Session => ({
   isWorktree: false,
   billingMode: "payg",
   worktreeName: null,
+  task: null,
   model: null,
   branch: null,
   status: "busy",

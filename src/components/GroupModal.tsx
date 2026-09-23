@@ -1,8 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 import { AgentIcon } from "@/components/BrandIcon";
+import { TranscriptModal } from "@/components/TranscriptModal";
+import { activityText } from "@/lib/activity";
 import { formatNotional, formatUsd, NOTIONAL_HINT } from "@/lib/cost";
-import { formatTokens, totalTokens } from "@/lib/format";
+import { formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session } from "@/lib/types";
 
 const statusLabel = { busy: "Sibuk", waiting: "Menunggu", idle: "Diam" } as const;
@@ -21,63 +23,111 @@ const healthIcon = { stalled: "lucide:octagon-alert", slow: "lucide:hourglass" }
 const healthText = { stalled: "Macet", slow: "Lambat" } as const;
 const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 
-const Row = ({ s, onOpenTerminal }: { s: Session; onOpenTerminal: (id?: string) => void }) => (
-  <div className="flex min-w-0 items-center gap-3 border-b border-border py-3 last:border-0">
-    <AgentIcon agent={s.agent} size={14} className={`shrink-0 ${agentText[s.agent]}`} />
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="truncate text-[13px] font-semibold" title={s.project}>
-          {s.project}
+const Row = ({
+  s,
+  onOpenTerminal,
+  onOpenTranscript,
+}: {
+  s: Session;
+  onOpenTerminal: (id?: string) => void;
+  onOpenTranscript: (s: Session) => void;
+}) => {
+  const act = activityText(s);
+  return (
+    <div className="flex min-w-0 items-center gap-3 border-b border-border py-3 last:border-0">
+      <AgentIcon agent={s.agent} size={14} className={`shrink-0 ${agentText[s.agent]}`} />
+      <button
+        type="button"
+        onClick={() => onOpenTranscript(s)}
+        className="ad-interactive flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 rounded-md px-1 py-0.5 text-left hover:bg-bg/60"
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-[13px] font-semibold" title={s.project}>
+            {s.project}
+          </span>
+          {s.isWorktree && s.worktreeName && (
+            <span className="flex min-w-0 items-center gap-1 rounded-full bg-bg px-1.5 py-0.5">
+              <Icon icon="lucide:folder-git-2" width={11} height={11} className="shrink-0 text-fg-3" />
+              <span className="truncate font-mono text-[11px] text-fg-3">{s.worktreeName}</span>
+            </span>
+          )}
         </span>
-        {s.isWorktree && s.worktreeName && (
-          <span className="flex min-w-0 items-center gap-1 rounded-full bg-bg px-1.5 py-0.5">
-            <Icon icon="lucide:folder-git-2" width={11} height={11} className="shrink-0 text-fg-3" />
-            <span className="truncate font-mono text-[11px] text-fg-3">{s.worktreeName}</span>
+        {s.task && (
+          <span className="truncate text-[12px] text-fg-2" title={s.task}>
+            {s.task}
           </span>
         )}
+        <span className="flex min-w-0 items-center gap-1 text-[11.5px]">
+          <span
+            className={`shrink-0 font-semibold ${
+              s.activity?.kind === "waiting" ? "text-waiting" : "text-fg-3"
+            }`}
+          >
+            {act.label}
+            {s.toolRunningMs !== null && (
+              <span className="font-normal text-fg-3"> · {formatShort(s.toolRunningMs)}</span>
+            )}
+          </span>
+          {act.detail && (
+            <span className="min-w-0 truncate font-mono text-[11.5px] text-fg-3" title={act.detail}>
+              {act.detail}
+            </span>
+          )}
+        </span>
+        {s.health !== "ok" && s.healthReason && (
+          <span
+            className={`truncate text-[11.5px] ${s.health === "stalled" ? "text-err" : "text-waiting"}`}
+            title={s.healthReason}
+          >
+            {s.healthReason}
+          </span>
+        )}
+        <span className="truncate text-[11.5px] text-fg-3" title={s.cwd}>
+          {[s.model, s.branch].filter(Boolean).join(" · ") || s.cwd}
+        </span>
+      </button>
+      {s.health === "ok" ? (
+        <span
+          className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${statusPill[s.status]}`}
+        >
+          <Icon icon={statusIcon[s.status]} width={12} height={12} />
+          {statusLabel[s.status]}
+        </span>
+      ) : (
+        <span
+          className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${healthPill[s.health]}`}
+        >
+          <Icon icon={healthIcon[s.health]} width={12} height={12} />
+          {healthText[s.health]}
+        </span>
+      )}
+      <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">
+        {formatTokens(totalTokens(s.tokens))}
       </span>
-      <span className="truncate text-[11.5px] text-fg-3" title={s.cwd}>
-        {[s.model, s.branch].filter(Boolean).join(" · ") || s.cwd}
-      </span>
+      {!s.priced ? (
+        <span className="shrink-0 font-mono text-[11.5px] text-fg-3" title="Model ini belum ada di tabel harga.">
+          -
+        </span>
+      ) : s.billingMode === "subscription" ? (
+        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-3" title={NOTIONAL_HINT}>
+          {formatNotional(s.costUsd)}
+        </span>
+      ) : (
+        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">{formatUsd(s.costUsd)}</span>
+      )}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenTerminal();
+        }}
+        className="ad-interactive ad-press shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] font-semibold text-fg-2 hover:border-fg-3 hover:text-fg"
+      >
+        Terminal
+      </button>
     </div>
-    {s.health === "ok" ? (
-      <span
-        className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${statusPill[s.status]}`}
-      >
-        <Icon icon={statusIcon[s.status]} width={12} height={12} />
-        {statusLabel[s.status]}
-      </span>
-    ) : (
-      <span
-        className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${healthPill[s.health]}`}
-      >
-        <Icon icon={healthIcon[s.health]} width={12} height={12} />
-        {healthText[s.health]}
-      </span>
-    )}
-    <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">
-      {formatTokens(totalTokens(s.tokens))}
-    </span>
-    {!s.priced ? (
-      <span className="shrink-0 font-mono text-[11.5px] text-fg-3" title="Model ini belum ada di tabel harga.">
-        -
-      </span>
-    ) : s.billingMode === "subscription" ? (
-      <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-3" title={NOTIONAL_HINT}>
-        {formatNotional(s.costUsd)}
-      </span>
-    ) : (
-      <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">{formatUsd(s.costUsd)}</span>
-    )}
-    <button
-      type="button"
-      onClick={() => onOpenTerminal()}
-      className="ad-interactive ad-press shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] font-semibold text-fg-2 hover:border-fg-3 hover:text-fg"
-    >
-      Terminal
-    </button>
-  </div>
-);
+  );
+};
 
 export const GroupModal = ({
   label,
@@ -90,12 +140,26 @@ export const GroupModal = ({
   onClose: () => void;
   onOpenTerminal: (sessionId?: string) => void;
 }) => {
+  const [transcript, setTranscript] = useState<Session | null>(null);
+  // Both modals listen for Escape. The transcript's handler closes it and
+  // clears its own state, so by the time this handler runs the transcript is
+  // already gone and the state can no longer tell us the press belonged to it.
+  // Listening in the capture phase and reading `transcript` from a ref that
+  // only mount/unmount writes keeps the two presses separate: the first one is
+  // captured while the transcript is still mounted and is ignored here.
+  const transcriptMounted = useRef(false);
+  useEffect(() => {
+    if (transcript) transcriptMounted.current = true;
+    return () => {
+      transcriptMounted.current = false;
+    };
+  }, [transcript]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !transcriptMounted.current) onClose();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
   return (
@@ -127,10 +191,11 @@ export const GroupModal = ({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-1">
           {sessions.map((s) => (
-            <Row key={s.id} s={s} onOpenTerminal={onOpenTerminal} />
+            <Row key={s.id} s={s} onOpenTerminal={onOpenTerminal} onOpenTranscript={setTranscript} />
           ))}
         </div>
       </div>
+      {transcript && <TranscriptModal session={transcript} onClose={() => setTranscript(null)} />}
     </div>
   );
 };
