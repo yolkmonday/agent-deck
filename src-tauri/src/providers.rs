@@ -86,7 +86,7 @@ pub const CLAUDE_MODELS: [&str; 4] = [
     "claude-haiku-4-5",
 ];
 
-pub const CODEX_NOTE: &str = "Dibaca dari riwayat sesi Codex.";
+pub const CODEX_NOTE: &str = "Read from Codex session history.";
 
 /// `~/.config/opencode`, falling back to the first path that exists.
 pub fn config_path(home: &str) -> Option<PathBuf> {

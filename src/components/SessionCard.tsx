@@ -4,15 +4,20 @@ import { AgentIcon } from "@/components/BrandIcon";
 import { ClaudeThinking } from "@/components/brainless/claude/claude-thinking";
 import { RecoverMenu } from "@/components/RecoverMenu";
 import { TranscriptModal } from "@/components/TranscriptModal";
+import { useT, type MessageKey } from "@/i18n";
 import { activityText } from "@/lib/activity";
-import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
+import { formatUsd, formatNotional } from "@/lib/cost";
 import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session, SubAgent } from "@/lib/types";
 import { useTerminal } from "@/store/terminal";
 
 const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 const agentName = { claude: "Claude", opencode: "opencode", codex: "Codex" } as const;
-const statusLabel = { busy: "Sibuk", waiting: "Menunggu", idle: "Diam" } as const;
+const statusLabel: Record<"busy" | "waiting" | "idle", MessageKey> = {
+  busy: "sessionCard.statusBusy",
+  waiting: "sessionCard.statusWaiting",
+  idle: "sessionCard.statusIdle",
+};
 const statusPill = {
   busy: "bg-busy/15 text-busy",
   waiting: "bg-waiting/15 text-waiting",
@@ -29,29 +34,35 @@ const healthIcon = { stalled: "lucide:octagon-alert", slow: "lucide:hourglass" }
 // A stalled session borrows the error colours and a slow one the waiting colours,
 // so the board never shows three different greens for three very different states.
 const healthPill = { stalled: "bg-err/15 text-err", slow: "bg-waiting/15 text-waiting" } as const;
-const healthText = { stalled: "Macet", slow: "Lambat" } as const;
+const healthText: Record<"stalled" | "slow", MessageKey> = {
+  stalled: "sessionCard.healthStalled",
+  slow: "sessionCard.healthSlow",
+};
 
-const SubAgentRow = ({ sub }: { sub: SubAgent }) => (
-  <div className="flex min-w-0 items-center gap-2 pt-1.5">
-    <Icon icon="lucide:git-branch" width={12} height={12} className="shrink-0 text-fg-3" />
-    <span className="shrink-0 text-[11.5px] font-semibold text-fg-2">{sub.agentType}</span>
-    <span className="min-w-0 flex-1 truncate text-[11.5px] text-fg-3" title={sub.description}>
-      {sub.description}
-    </span>
-    <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">
-      {formatTokens(totalTokens(sub.tokens))}
-    </span>
-    {sub.priced ? (
+const SubAgentRow = ({ sub }: { sub: SubAgent }) => {
+  const t = useT();
+  return (
+    <div className="flex min-w-0 items-center gap-2 pt-1.5">
+      <Icon icon="lucide:git-branch" width={12} height={12} className="shrink-0 text-fg-3" />
+      <span className="shrink-0 text-[11.5px] font-semibold text-fg-2">{sub.agentType}</span>
+      <span className="min-w-0 flex-1 truncate text-[11.5px] text-fg-3" title={sub.description}>
+        {sub.description}
+      </span>
       <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">
-        {formatUsd(sub.costUsd)}
+        {formatTokens(totalTokens(sub.tokens))}
       </span>
-    ) : (
-      <span className="shrink-0 font-mono text-[11.5px] text-fg-3" title="Model ini belum ada di tabel harga.">
-        -
-      </span>
-    )}
-  </div>
-);
+      {sub.priced ? (
+        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">
+          {formatUsd(sub.costUsd)}
+        </span>
+      ) : (
+        <span className="shrink-0 font-mono text-[11.5px] text-fg-3" title={t("sessionCard.notPriced")}>
+          -
+        </span>
+      )}
+    </div>
+  );
+};
 
 export const SessionCard = ({
   session: s,
@@ -72,6 +83,7 @@ export const SessionCard = ({
   siblingWaiting?: number;
   onOpenSiblings?: () => void;
 }) => {
+  const t = useT();
   const waiting = s.status === "waiting";
   const stalled = s.health === "stalled";
   const slow = s.health === "slow";
@@ -103,7 +115,7 @@ export const SessionCard = ({
       openOwned();
       return;
     }
-    setNote("Sesi ini jalan di terminal lain. Buka di sana.");
+    setNote(t("sessionCard.otherTerminal"));
   };
 
   // Not `window.confirm`: Tauri v2 routes it to the dialog plugin, which needs a
@@ -112,7 +124,7 @@ export const SessionCard = ({
   const startNew = () => {
     if (!confirmStart) {
       setConfirmStart(true);
-      setNote(`Mulai ${s.agent} baru di ${s.cwd}? Ini proses baru, bukan lanjutan sesi ini.`);
+      setNote(t("sessionCard.confirmStartNew", { agent: s.agent, cwd: s.cwd }));
       return;
     }
     setConfirmStart(false);
@@ -120,7 +132,7 @@ export const SessionCard = ({
     setNote(null);
     void startSession(s.agent, s.cwd)
       .then(() => onOpenTerminal())
-      .catch(() => setNote("Gagal memulai sesi. Cek notifikasi di halaman Terminal."))
+      .catch(() => setNote(t("sessionCard.startFailed")))
       .finally(() => setBusy(false));
   };
 
@@ -152,12 +164,12 @@ export const SessionCard = ({
               height={12}
               className={s.status === "busy" ? "animate-spin [animation-duration:2s] motion-reduce:animate-none" : ""}
             />
-            {statusLabel[s.status]}
+            {t(statusLabel[s.status])}
           </span>
         ) : (
           <span className={`flex items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${healthPill[s.health]}`}>
             <Icon icon={healthIcon[s.health]} width={12} height={12} />
-            {healthText[s.health]}
+            {t(healthText[s.health])}
           </span>
         )}
       </div>
@@ -196,7 +208,7 @@ export const SessionCard = ({
       <div className={`flex min-w-0 flex-col gap-1 rounded-md px-3 py-2.5 ${waiting ? "bg-waiting/10" : "bg-bg"}`}>
         {thinking ? (
           // Single verb, no token estimate, no interrupt hint: see the P14 plan for why.
-          <ClaudeThinking verbs={["Berpikir"]} showTokens={false} hint={null} elapsedMs={s.quietMs} />
+          <ClaudeThinking verbs={[t("sessionCard.thinking")]} showTokens={false} hint={null} elapsedMs={s.quietMs} />
         ) : (
           <span className={`truncate text-[11.5px] font-semibold ${waiting ? "text-waiting" : "text-fg-3"}`}>
             {act.label}
@@ -225,8 +237,17 @@ export const SessionCard = ({
           }`}
         >
           <Icon icon="lucide:folder-git-2" width={12} height={12} />
-          {siblingCount} worktree jalan
-          {siblingWaiting > 0 && <span className="font-semibold">· {siblingWaiting} butuh jawaban</span>}
+          {t(siblingCount === 1 ? "sessionCard.siblingsRunning.one" : "sessionCard.siblingsRunning.other", {
+            count: siblingCount,
+          })}
+          {siblingWaiting > 0 && (
+            <span className="font-semibold">
+              ·{" "}
+              {t(siblingWaiting === 1 ? "sessionCard.needsAnswer.one" : "sessionCard.needsAnswer.other", {
+                count: siblingWaiting,
+              })}
+            </span>
+          )}
           <Icon icon="lucide:chevron-right" width={12} height={12} className="ml-auto" />
         </button>
       )}
@@ -246,7 +267,9 @@ export const SessionCard = ({
               height={12}
               className={subagentsOpen ? "rotate-90" : ""}
             />
-            {s.subagents.length} subagent jalan
+            {t(s.subagents.length === 1 ? "sessionCard.subagentsRunning.one" : "sessionCard.subagentsRunning.other", {
+              count: s.subagents.length,
+            })}
           </button>
           {subagentsOpen && (
             <div className="mt-1 flex min-w-0 flex-col divide-y divide-border">
@@ -261,13 +284,13 @@ export const SessionCard = ({
         <div className="flex items-center gap-3 font-mono text-[11.5px] whitespace-nowrap">
           <span className="text-fg-2">{formatTokens(totalTokens(s.tokens))}</span>
           {!s.priced ? (
-            <span className="text-fg-3" title="Model ini belum ada di tabel harga.">
+            <span className="text-fg-3" title={t("sessionCard.notPriced")}>
               -
             </span>
           ) : s.billingMode === "subscription" ? (
             // A subscription's tokens cost nothing extra, so the figure is an
             // estimate at API rates and must never read like a bill.
-            <span className="text-fg-3" title={NOTIONAL_HINT}>
+            <span className="text-fg-3" title={t("cost.notionalHint")}>
               {formatNotional(s.costUsd)}
             </span>
           ) : (
@@ -283,7 +306,7 @@ export const SessionCard = ({
               onClick={answerWaiting}
               className="ad-interactive ad-press shrink-0 cursor-pointer rounded-md bg-waiting px-3 py-1.25 text-[12px] font-semibold text-bg hover:opacity-90"
             >
-              Jawab
+              {t("sessionCard.answer")}
             </button>
           ) : (
             <button
@@ -296,7 +319,7 @@ export const SessionCard = ({
                 !confirmStart && !busy ? "text-fg-2" : ""
               }`}
             >
-              {confirmStart ? "Yakin?" : "Terminal"}
+              {confirmStart ? t("sessionCard.confirmStartLabel") : t("sessionCard.openTerminal")}
             </button>
           )}
         </div>
@@ -306,7 +329,7 @@ export const SessionCard = ({
           <span className="min-w-0 flex-1">{note}</span>
           {confirmStart && (
             <button type="button" onClick={cancelStart} className="ad-interactive ad-press shrink-0 cursor-pointer underline hover:text-fg">
-              Batal
+              {t("common.cancel")}
             </button>
           )}
         </span>

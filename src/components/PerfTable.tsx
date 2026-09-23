@@ -1,7 +1,8 @@
 import { Fragment, useState } from "react";
 import { AgentIcon } from "@/components/BrandIcon";
+import { useT } from "@/i18n";
 import type { PerfAgg } from "@/lib/api";
-import { ESTIMATE_HINT, formatTps, formatTtft, LOW_SAMPLES, type PerfSortKey } from "@/lib/perf";
+import { formatTps, formatTtft, LOW_SAMPLES, type PerfSortKey } from "@/lib/perf";
 
 const SortHead = ({
   children,
@@ -44,12 +45,14 @@ const Row = ({
   expanded: boolean;
   onToggleExpand: (key: string) => void;
 }) => {
+  const t = useT();
   const lowSamples = row.samples < LOW_SAMPLES;
   const hasChildren = row.children.length > 0;
+  const estimateHint = t("format.estimateHint");
   return (
     <tr
       onClick={() => onSelect(row.key)}
-      title={lowSamples ? "Sampel sedikit" : undefined}
+      title={lowSamples ? t("perfTable.lowSamples") : undefined}
       className={`cursor-pointer border-b border-border/60 last:border-0 ${lowSamples ? "opacity-50" : ""} ${selected ? "bg-surface-2" : ""}`}
     >
       <td className={`py-3 ${depth > 0 ? "pl-6" : ""}`}>
@@ -70,10 +73,10 @@ const Row = ({
           {row.label}
         </span>
       </td>
-      <td className="py-3 text-right font-mono text-[12.5px] font-semibold text-fg" title={!row.precise ? ESTIMATE_HINT : undefined}>
+      <td className="py-3 text-right font-mono text-[12.5px] font-semibold text-fg" title={!row.precise ? estimateHint : undefined}>
         {formatTps(row.tpsP50, row.precise)}
       </td>
-      <td className="py-3 text-right font-mono text-[12.5px] text-fg-2" title={!row.precise ? ESTIMATE_HINT : undefined}>
+      <td className="py-3 text-right font-mono text-[12.5px] text-fg-2" title={!row.precise ? estimateHint : undefined}>
         {formatTps(row.tpsP10, row.precise)}
       </td>
       <td className="py-3 text-right font-mono text-[12.5px] text-fg-2">{formatTtft(row.ttftP50Ms)}</td>
@@ -95,6 +98,7 @@ export const PerfTable = ({
   selected: string[];
   onSelect: (key: string) => void;
 }) => {
+  const t = useT();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const onToggleExpand = (key: string) =>
@@ -109,11 +113,11 @@ export const PerfTable = ({
     <table className="w-full border-collapse">
       <thead>
         <tr className="border-b border-border">
-          <th className="pb-2.5 text-left text-[11px] font-medium text-fg-3">Model</th>
-          <SortHead sortKey="tpsP50" sort={sort} onSort={onSort}>TPS p50</SortHead>
-          <SortHead sortKey="tpsP10" sort={sort} onSort={onSort}>TPS p10</SortHead>
-          <SortHead sortKey="ttftP50Ms" sort={sort} onSort={onSort}>TTFT p50</SortHead>
-          <SortHead sortKey="samples" sort={sort} onSort={onSort}>Sampel</SortHead>
+          <th className="pb-2.5 text-left text-[11px] font-medium text-fg-3">{t("perfTable.model")}</th>
+          <SortHead sortKey="tpsP50" sort={sort} onSort={onSort}>{t("perfTable.tpsP50")}</SortHead>
+          <SortHead sortKey="tpsP10" sort={sort} onSort={onSort}>{t("perfTable.tpsP10")}</SortHead>
+          <SortHead sortKey="ttftP50Ms" sort={sort} onSort={onSort}>{t("perfTable.ttftP50")}</SortHead>
+          <SortHead sortKey="samples" sort={sort} onSort={onSort}>{t("perfTable.samples")}</SortHead>
         </tr>
       </thead>
       <tbody>

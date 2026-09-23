@@ -2,24 +2,25 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { RangeFilter } from "@/components/RangeFilter";
 import { SavingsChart } from "@/components/SavingsChart";
+import { type MessageKey, useT } from "@/i18n";
 import { savingsSummary } from "@/lib/api";
 import type { SavingsCommand, SavingsSource } from "@/lib/api";
 import { formatPct } from "@/lib/cost";
 import { formatTokens } from "@/lib/format";
 
-const WARNING_TEXT: Record<string, string> = {
-  "database not found": "basis data tidak ditemukan",
-  "stats file not found": "berkas statistik tidak ditemukan",
-  "failed to read database": "gagal membaca basis data",
-  "failed to parse stats": "gagal membaca statistik",
+const WARNING_KEYS: Record<string, MessageKey> = {
+  "database not found": "savingsPage.warningDbNotFound",
+  "stats file not found": "savingsPage.warningStatsNotFound",
+  "failed to read database": "savingsPage.warningReadDbFailed",
+  "failed to parse stats": "savingsPage.warningParseStatsFailed",
 };
 
-const translateWarning = (warning: string): string => {
+const translateWarning = (warning: string, t: (key: MessageKey) => string): string => {
   const [source, ...rest] = warning.split(": ");
   const detail = rest.join(": ");
   if (!detail) return warning;
-  const known = WARNING_TEXT[detail];
-  return known ? `${source}: ${known}` : warning;
+  const key = WARNING_KEYS[detail];
+  return key ? `${source}: ${t(key)}` : warning;
 };
 
 const Kpi = ({ label, value, sub, tone = "text-fg" }: { label: string; value: string; sub: string; tone?: string }) => (
@@ -30,12 +31,21 @@ const Kpi = ({ label, value, sub, tone = "text-fg" }: { label: string; value: st
   </div>
 );
 
-const sourceSub = (source: SavingsSource | undefined, fallback: string) =>
-  source?.available ? `${source.entries} perintah · hemat ${formatPct(source.savingsPct)}` : fallback;
+const sourceSub = (
+  source: SavingsSource | undefined,
+  fallback: string,
+  t: ReturnType<typeof useT>,
+) =>
+  source?.available
+    ? t(source.entries === 1 ? "savingsPage.commandsSaved.one" : "savingsPage.commandsSaved.other", {
+        n: source.entries,
+        pct: formatPct(source.savingsPct),
+      })
+    : fallback;
 
-const TopCommands = ({ rows }: { rows: SavingsCommand[] }) =>
+const TopCommands = ({ rows, t }: { rows: SavingsCommand[]; t: ReturnType<typeof useT> }) =>
   rows.length === 0 ? (
-    <div className="flex h-64 items-center justify-center text-sm text-fg-3">Belum ada data.</div>
+    <div className="flex h-64 items-center justify-center text-sm text-fg-3">{t("savingsPage.noTopCommands")}</div>
   ) : (
     <ul className="flex flex-col">
       {rows.map((r) => (
@@ -51,6 +61,7 @@ const TopCommands = ({ rows }: { rows: SavingsCommand[] }) =>
   );
 
 export const SavingsPage = () => {
+  const t = useT();
   const [days, setDays] = useState(7);
   const { data, isError, error, isPending } = useQuery({
     queryKey: ["savings", days],
@@ -70,35 +81,46 @@ export const SavingsPage = () => {
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
         <div className="flex flex-col gap-0.75">
-          <h1 className="text-[22px] font-semibold">Hemat Token</h1>
-          <span className="text-[12.5px] text-fg-2">Token yang dihemat rtk dan lean-ctx</span>
+          <h1 className="text-[22px] font-semibold">{t("savingsPage.title")}</h1>
+          <span className="text-[12.5px] text-fg-2">{t("savingsPage.subtitle")}</span>
         </div>
         <RangeFilter value={days} onChange={setDays} />
       </header>
       <main className="flex min-w-0 flex-1 flex-col gap-6.5 overflow-y-auto px-7 pb-7">
         <div className="flex">
           <Kpi
-            label="Total dihemat"
+            label={t("savingsPage.totalSavedLabel")}
             value={formatTokens(totalSaved)}
-            sub={totalSource > 0 ? `hemat ${formatPct((totalSaved / totalSource) * 100)}` : "belum ada data"}
+            sub={
+              totalSource > 0
+                ? t("savingsPage.savedPct", { pct: formatPct((totalSaved / totalSource) * 100) })
+                : t("savingsPage.noData")
+            }
             tone="text-ok"
           />
           <Kpi
             label="rtk"
             value={formatTokens(rtk?.savedTokens ?? 0)}
-            sub={sourceSub(rtk, "tidak tersedia")}
+            sub={sourceSub(rtk, t("savingsPage.notAvailable"), t)}
             tone={rtk?.available ? "text-fg" : "text-fg-3"}
           />
           <Kpi
             label="lean-ctx"
             value={formatTokens(lean?.savedTokens ?? 0)}
-            sub={sourceSub(lean, "tidak tersedia")}
+            sub={sourceSub(lean, t("savingsPage.notAvailable"), t)}
             tone={lean?.available ? "text-fg" : "text-fg-3"}
           />
           <Kpi
-            label="Command teratas"
+            label={t("savingsPage.topCommandLabel")}
             value={topCommands[0]?.command ?? "-"}
-            sub={topCommands[0] ? `${formatTokens(topCommands[0].savedTokens)} · ${formatPct(topCommands[0].savingsPct)}` : "belum ada data"}
+            sub={
+              topCommands[0]
+                ? t("savingsPage.topCommandSaved", {
+                    tokens: formatTokens(topCommands[0].savedTokens),
+                    pct: formatPct(topCommands[0].savingsPct),
+                  })
+                : t("savingsPage.noData")
+            }
             tone={topCommands[0] ? "text-fg" : "text-fg-3"}
           />
         </div>
@@ -112,16 +134,18 @@ export const SavingsPage = () => {
         {warnings.length > 0 && (
           <div className="flex flex-col gap-0.5 text-xs text-fg-3">
             {warnings.map((w) => (
-              <span key={w}>{translateWarning(w)}</span>
+              <span key={w}>{translateWarning(w, t)}</span>
             ))}
           </div>
         )}
 
-        {isPending && <div className="flex h-64 items-center justify-center text-sm text-fg-3">Memuat data…</div>}
+        {isPending && (
+          <div className="flex h-64 items-center justify-center text-sm text-fg-3">{t("savingsPage.loading")}</div>
+        )}
 
         {empty && (
           <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-fg-3">
-            Belum ada data. rtk dan lean-ctx belum mencatat aktivitas.
+            {t("savingsPage.empty")}
           </div>
         )}
 
@@ -129,8 +153,8 @@ export const SavingsPage = () => {
           <>
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold">Token dihemat per hari</span>
-                <span className="text-xs text-fg-3">Ditumpuk per sumber</span>
+                <span className="text-sm font-semibold">{t("savingsPage.dailyTitle")}</span>
+                <span className="text-xs text-fg-3">{t("savingsPage.stackedBySource")}</span>
               </div>
               <div className="rounded-[10px] border border-border bg-surface px-5 py-4">
                 <SavingsChart data={daily} />
@@ -139,11 +163,11 @@ export const SavingsPage = () => {
 
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold">Command teratas</span>
-                <span className="text-xs text-fg-3">Urut token dihemat</span>
+                <span className="text-sm font-semibold">{t("savingsPage.topCommandLabel")}</span>
+                <span className="text-xs text-fg-3">{t("savingsPage.sortedByTokensSaved")}</span>
               </div>
               <div className="rounded-[10px] border border-border bg-surface px-5 py-4">
-                <TopCommands rows={topCommands} />
+                <TopCommands rows={topCommands} t={t} />
               </div>
             </section>
           </>

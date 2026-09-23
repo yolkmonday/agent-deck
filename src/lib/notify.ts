@@ -1,4 +1,5 @@
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { t } from "@/i18n";
 import type { Session } from "@/lib/types";
 
 let permission: boolean | null = null;
@@ -26,8 +27,8 @@ export const notifyWaiting = async (session: Session): Promise<boolean> => {
   if (!(await ensurePermission())) return false;
   try {
     sendNotification({
-      title: `${session.project} butuh jawaban`,
-      body: `${session.model ?? session.agent} · menunggu input`,
+      title: t("notify.waiting.title", { project: session.project }),
+      body: t("notify.waiting.body", { who: session.model ?? session.agent }),
     });
     return true;
   } catch {
@@ -39,8 +40,8 @@ export const notifyStalled = async (session: Session): Promise<boolean> => {
   if (!(await ensurePermission())) return false;
   try {
     sendNotification({
-      title: `${session.project} macet`,
-      body: session.healthReason ?? `${session.model ?? session.agent} · tidak ada kemajuan`,
+      title: t("notify.stalled.title", { project: session.project }),
+      body: session.healthReason ?? t("notify.stalled.bodyFallback", { who: session.model ?? session.agent }),
     });
     return true;
   } catch {

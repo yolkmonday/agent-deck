@@ -1,20 +1,44 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { useLang } from "@/i18n";
 import type { PerfAgg } from "@/lib/api";
 import { chartSeries, filterPerf, formatTps, formatTtft, sortPerf } from "@/lib/perf";
+
+afterEach(() => useLang.setState({ lang: "en" }));
 
 const row = (key: string, tpsP50: number, ttftP50Ms: number | null, samples = 10, models = [key]): PerfAgg => ({
   key, label: key, agent: "opencode", models, samples, tpsP50, tpsP10: tpsP50 / 2, ttftP50Ms, precise: true, daily: [], children: [],
 });
 
-describe("formatTps", () => {
-  it("formats with one decimal, id-ID", () => expect(formatTps(41.23, true)).toBe("41,2"));
-  it("prefixes estimates with ~", () => expect(formatTps(41.23, false)).toBe("~41,2"));
+describe("id", () => {
+  beforeEach(() => useLang.setState({ lang: "id" }));
+
+  describe("formatTps", () => {
+    it("formats with one decimal, id-ID", () => expect(formatTps(41.23, true)).toBe("41,2"));
+    it("prefixes estimates with ~", () => expect(formatTps(41.23, false)).toBe("~41,2"));
+    it("matches brief example", () => expect(formatTps(12.34, true)).toBe("12,3"));
+  });
+
+  describe("formatTtft", () => {
+    it("dash when unknown", () => expect(formatTtft(null)).toBe("-"));
+    it("ms under a second", () => expect(formatTtft(850)).toBe("850 ms"));
+    it("seconds above", () => expect(formatTtft(1100)).toBe("1,1 dtk"));
+    it("matches brief example", () => expect(formatTtft(1500)).toBe("1,5 dtk"));
+  });
 });
 
-describe("formatTtft", () => {
-  it("dash when unknown", () => expect(formatTtft(null)).toBe("-"));
-  it("ms under a second", () => expect(formatTtft(850)).toBe("850 ms"));
-  it("seconds above", () => expect(formatTtft(1100)).toBe("1,1 dtk"));
+describe("en", () => {
+  beforeEach(() => useLang.setState({ lang: "en" }));
+
+  describe("formatTps", () => {
+    it("formats with one decimal, en-US", () => expect(formatTps(12.34, true)).toBe("12.3"));
+    it("prefixes estimates with ~", () => expect(formatTps(12.34, false)).toBe("~12.3"));
+  });
+
+  describe("formatTtft", () => {
+    it("dash when unknown", () => expect(formatTtft(null)).toBe("-"));
+    it("ms under a second", () => expect(formatTtft(850)).toBe("850 ms"));
+    it("seconds above", () => expect(formatTtft(1500)).toBe("1.5 s"));
+  });
 });
 
 describe("sortPerf", () => {

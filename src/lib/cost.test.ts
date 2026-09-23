@@ -1,6 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { useLang } from "@/i18n";
+import { t } from "@/i18n";
 import type { DailyRow } from "@/lib/api";
-import { formatNotional, formatPct, formatUsd, NOTIONAL_HINT, stackByDate } from "@/lib/cost";
+import { formatNotional, formatPct, formatUsd, stackByDate } from "@/lib/cost";
+
+afterEach(() => {
+  useLang.setState({ lang: "en" });
+});
 
 const usage = (input: number, output: number, cacheRead = 0, cacheWrite = 0, reasoning = 0) => ({
   input,
@@ -11,14 +17,30 @@ const usage = (input: number, output: number, cacheRead = 0, cacheWrite = 0, rea
 });
 
 describe("formatUsd", () => {
-  test("two decimals with comma separator and dollar prefix", () => {
+  test("EN uses a period decimal separator", () => {
+    useLang.setState({ lang: "en" });
+    expect(formatUsd(12.6)).toBe("$12.60");
+    expect(formatUsd(1234.5)).toBe("$1234.50");
+  });
+  test("EN zero renders as zero", () => {
+    useLang.setState({ lang: "en" });
+    expect(formatUsd(0)).toBe("$0.00");
+  });
+  test("EN tiny positive values render as less than one cent", () => {
+    useLang.setState({ lang: "en" });
+    expect(formatUsd(0.004)).toBe("<$0.01");
+  });
+  test("ID two decimals with comma separator and dollar prefix", () => {
+    useLang.setState({ lang: "id" });
     expect(formatUsd(12.6)).toBe("$12,60");
     expect(formatUsd(1234.5)).toBe("$1234,50");
   });
-  test("zero renders as zero", () => {
+  test("ID zero renders as zero", () => {
+    useLang.setState({ lang: "id" });
     expect(formatUsd(0)).toBe("$0,00");
   });
-  test("tiny positive values render as less than one cent", () => {
+  test("ID tiny positive values render as less than one cent", () => {
+    useLang.setState({ lang: "id" });
     expect(formatUsd(0.004)).toBe("<$0,01");
   });
 });
@@ -31,13 +53,20 @@ describe("formatPct", () => {
 });
 
 describe("formatNotional", () => {
-  test("always carries the approximation marker", () => {
+  test("EN always carries the approximation marker", () => {
+    useLang.setState({ lang: "en" });
+    expect(formatNotional(806.42)).toBe("≈ $806.42");
+    expect(formatNotional(0)).toBe("≈ $0.00");
+    expect(formatNotional(0.004)).toBe("≈ <$0.01");
+  });
+  test("ID always carries the approximation marker", () => {
+    useLang.setState({ lang: "id" });
     expect(formatNotional(806.42)).toBe("≈ $806,42");
     expect(formatNotional(0)).toBe("≈ $0,00");
     expect(formatNotional(0.004)).toBe("≈ <$0,01");
   });
   test("the tooltip says the figure does not add to the bill", () => {
-    expect(NOTIONAL_HINT).toBe("Perkiraan kalau dibayar per token. Tidak menambah tagihan.");
+    expect(t("cost.notionalHint")).toBe("Estimate if billed per token. Doesn't add to the bill.");
   });
 });
 

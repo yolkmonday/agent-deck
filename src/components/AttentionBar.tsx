@@ -1,8 +1,5 @@
-import { Settings } from "lucide-react";
-import { useState } from "react";
 import { RecoverMenu } from "@/components/RecoverMenu";
-import { SettingsPopover } from "@/components/SettingsPopover";
-import type { AttentionMode, Settings as SettingsValue } from "@/lib/api";
+import { useT } from "@/i18n";
 import type { Orphan, Session } from "@/lib/types";
 import { healthLabel, orphanLabel, waitingLabel } from "@/lib/attention";
 
@@ -11,25 +8,17 @@ export const AttentionBar = ({
   unhealthy,
   orphans,
   nowMs,
-  settings,
   onJump,
   onOpenTerminal,
-  onMode,
-  onNotifySound,
-  onMinutes,
 }: {
   sessions: Session[];
   unhealthy: Session[];
   orphans: Orphan[];
   nowMs: number;
-  settings: SettingsValue;
   onJump: () => void;
   onOpenTerminal: (termId: string) => void;
-  onMode: (mode: AttentionMode) => void;
-  onNotifySound: (enabled: boolean) => void;
-  onMinutes: (value: { stallMinutes: number; slowToolMinutes: number }) => void;
 }) => {
-  const [open, setOpen] = useState(false);
+  const t = useT();
   const first = sessions[0];
   const bad = unhealthy[0];
   if (!first && !bad && orphans.length === 0) return null;
@@ -54,7 +43,9 @@ export const AttentionBar = ({
         <span className={`truncate text-[13px] font-semibold ${tone === "waiting" ? "text-waiting" : "text-err"}`}>
           {text}
         </span>
-        {extra > 0 && <span className="shrink-0 text-[12.5px] text-fg-2">dan {extra} lainnya</span>}
+        {extra > 0 && (
+          <span className="shrink-0 text-[12.5px] text-fg-2">{t("attentionBar.andMore", { n: extra })}</span>
+        )}
         {jumpable && (
           <button
             type="button"
@@ -63,34 +54,12 @@ export const AttentionBar = ({
               tone === "waiting" ? "bg-waiting" : "bg-err"
             }`}
           >
-            Buka
+            {t("attentionBar.open")}
           </button>
         )}
         {!first && bad && bad.health === "stalled" && (
           <RecoverMenu session={bad} onOpenTerminal={onOpenTerminal} />
         )}
-        <div className={`relative shrink-0 ${jumpable ? "" : "ml-auto"}`}>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            title="Pengaturan notifikasi"
-            className="ad-interactive ad-press cursor-pointer rounded-md border border-border p-1.5 text-fg-2 hover:border-fg-3 hover:text-fg"
-          >
-            <Settings size={14} />
-          </button>
-          {open && (
-            <SettingsPopover
-              mode={settings.attentionMode}
-              notifySound={settings.notifySound}
-              stallMinutes={settings.stallMinutes}
-              slowToolMinutes={settings.slowToolMinutes}
-              onMode={onMode}
-              onNotifySound={onNotifySound}
-              onMinutes={onMinutes}
-              onClose={() => setOpen(false)}
-            />
-          )}
-        </div>
       </div>
       {orphans.map((o) => (
         <div key={`${o.pid}-${o.cwd}`} className="flex items-center gap-3 border-t border-err/25 px-7 py-1.5">

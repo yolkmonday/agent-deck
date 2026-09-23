@@ -3,34 +3,39 @@ import { useState } from "react";
 import { NewSessionDialog } from "@/components/NewSessionDialog";
 import { TerminalTabs } from "@/components/TerminalTabs";
 import { TerminalView } from "@/components/TerminalView";
+import { useT } from "@/i18n";
 import { stopSession, useTerminal } from "@/store/terminal";
 
-const ConfirmDialog = ({ label, onCancel, onConfirm }: { label: string; onCancel: () => void; onConfirm: () => void }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 px-6">
-    <div className="flex w-full max-w-sm flex-col gap-4 rounded-[12px] border border-border bg-surface p-5">
-      <span className="text-base font-semibold">Hentikan sesi ini?</span>
-      <span className="font-mono text-xs text-fg-2">{label}</span>
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3.5 py-2 text-[13px] text-fg-2 hover:border-fg-3 hover:text-fg"
-        >
-          Batal
-        </button>
-        <button
-          type="button"
-          onClick={onConfirm}
-          className="ad-interactive ad-press cursor-pointer rounded-md bg-err px-3.5 py-2 text-[13px] font-semibold text-bg hover:opacity-90"
-        >
-          Hentikan
-        </button>
+const ConfirmDialog = ({ label, onCancel, onConfirm }: { label: string; onCancel: () => void; onConfirm: () => void }) => {
+  const t = useT();
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 px-6">
+      <div className="flex w-full max-w-sm flex-col gap-4 rounded-[12px] border border-border bg-surface p-5">
+        <span className="text-base font-semibold">{t("terminalPage.confirmStopTitle")}</span>
+        <span className="font-mono text-xs text-fg-2">{label}</span>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3.5 py-2 text-[13px] text-fg-2 hover:border-fg-3 hover:text-fg"
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="ad-interactive ad-press cursor-pointer rounded-md bg-err px-3.5 py-2 text-[13px] font-semibold text-bg hover:opacity-90"
+          >
+            {t("terminalPage.stop")}
+          </button>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export const TerminalPage = ({ initialSessionId }: { initialSessionId?: string | null }) => {
+  const t = useT();
   const sessions = useTerminal((s) => s.sessions);
   const activeId = useTerminal((s) => s.activeId);
   const error = useTerminal((s) => s.error);
@@ -51,8 +56,8 @@ export const TerminalPage = ({ initialSessionId }: { initialSessionId?: string |
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
         <div className="flex flex-col gap-0.75">
-          <h1 className="text-[22px] font-semibold">Terminal</h1>
-          <span className="text-[12.5px] text-fg-2">Sesi di sini mati kalau app ditutup.</span>
+          <h1 className="text-[22px] font-semibold">{t("terminalPage.title")}</h1>
+          <span className="text-[12.5px] text-fg-2">{t("terminalPage.subtitle")}</span>
         </div>
         <button
           type="button"
@@ -60,7 +65,7 @@ export const TerminalPage = ({ initialSessionId }: { initialSessionId?: string |
           className="ad-interactive ad-press flex cursor-pointer items-center gap-1.5 rounded-md bg-busy px-3.5 py-2 text-[13px] font-semibold text-bg hover:opacity-90"
         >
           <Plus size={15} />
-          Sesi baru
+          {t("terminalPage.newSession")}
         </button>
       </header>
 
@@ -75,7 +80,7 @@ export const TerminalPage = ({ initialSessionId }: { initialSessionId?: string |
       {active === null ? (
         <div className="flex flex-1 items-center justify-center px-7 pb-7">
           <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-fg-3">
-            Belum ada sesi. Klik "Sesi baru" untuk mulai.
+            {t("terminalPage.empty", { newSession: t("terminalPage.newSession") })}
           </div>
         </div>
       ) : (
@@ -83,7 +88,7 @@ export const TerminalPage = ({ initialSessionId }: { initialSessionId?: string |
           <div className="flex items-center gap-3 px-7 py-2">
             <span className="truncate font-mono text-[11.5px] text-fg-3">{active.command}</span>
             <span className="truncate font-mono text-[11.5px] text-fg-3">{active.cwd}</span>
-            {!active.alive && <span className="text-[11.5px] font-semibold text-idle">sudah berakhir</span>}
+            {!active.alive && <span className="text-[11.5px] font-semibold text-idle">{t("terminalPage.ended")}</span>}
           </div>
           <div className="min-h-0 flex-1 px-5">
             {sessions.map((s) => (

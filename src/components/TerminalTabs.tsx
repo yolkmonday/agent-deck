@@ -1,11 +1,13 @@
 import { X } from "lucide-react";
 import { AgentIcon } from "@/components/BrandIcon";
+import { useT } from "@/i18n";
 import type { TermSession } from "@/lib/api";
 import { useTerminal } from "@/store/terminal";
 
 const AGENT_TEXT = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 
 export const TerminalTabs = ({ onClose }: { onClose: (id: string) => void }) => {
+  const t = useT();
   const sessions = useTerminal((s) => s.sessions);
   const activeId = useTerminal((s) => s.activeId);
   const select = useTerminal((s) => s.select);
@@ -34,7 +36,7 @@ export const TerminalTabs = ({ onClose }: { onClose: (id: string) => void }) => 
           <button
             type="button"
             onClick={() => onClose(s.id)}
-            title="Tutup sesi"
+            title={t("terminalTabs.closeSession")}
             className="ad-interactive ad-press cursor-pointer text-fg-3 hover:text-err"
           >
             <X size={13} />

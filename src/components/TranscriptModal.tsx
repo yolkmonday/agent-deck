@@ -3,14 +3,18 @@ import { Icon } from "@iconify/react";
 import { AgentIcon } from "@/components/BrandIcon";
 import { ClaudeMessage } from "@/components/brainless/claude/claude-message";
 import { ClaudeToolCall } from "@/components/brainless/claude/claude-tool-call";
+import { useT, type MessageKey } from "@/i18n";
 import { sessionTail, type TailEntry } from "@/lib/api";
 import type { Session } from "@/lib/types";
 
 const POLL_MS = 1500;
 const NEAR_BOTTOM_PX = 24;
-const EMPTY_TEXT = "Belum ada isi transcript untuk sesi ini.";
 
-const statusLabel = { busy: "Sibuk", waiting: "Menunggu", idle: "Diam" } as const;
+const statusLabel: Record<"busy" | "waiting" | "idle", MessageKey> = {
+  busy: "transcriptModal.statusBusy",
+  waiting: "transcriptModal.statusWaiting",
+  idle: "transcriptModal.statusIdle",
+};
 const statusPill = {
   busy: "bg-busy/15 text-busy",
   waiting: "bg-waiting/15 text-waiting",
@@ -23,11 +27,18 @@ const statusIcon = {
 } as const;
 const healthPill = { stalled: "bg-err/15 text-err", slow: "bg-waiting/15 text-waiting" } as const;
 const healthIcon = { stalled: "lucide:octagon-alert", slow: "lucide:hourglass" } as const;
-const healthText = { stalled: "Macet", slow: "Lambat" } as const;
+const healthText: Record<"stalled" | "slow", MessageKey> = {
+  stalled: "transcriptModal.healthStalled",
+  slow: "transcriptModal.healthSlow",
+};
 const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 
 const toolStatus = { running: "pending", ok: "success", error: "error" } as const;
-const toolStatusText = { running: "sedang jalan", ok: "selesai", error: "gagal" } as const;
+const toolStatusKey: Record<"running" | "ok" | "error", MessageKey> = {
+  running: "transcriptModal.toolRunning",
+  ok: "transcriptModal.toolOk",
+  error: "transcriptModal.toolError",
+};
 
 // Mirrors the collector's `tool_detail`: the one argument that names the call.
 const ARG_KEYS = ["command", "file_path", "pattern", "description", "prompt", "url"];
@@ -57,6 +68,7 @@ const argSummary = (input: string): string => {
 };
 
 const Entry = ({ entry }: { entry: TailEntry }) => {
+  const t = useT();
   switch (entry.kind) {
     case "user":
       return <ClaudeMessage role="user">{entry.text}</ClaudeMessage>;
@@ -68,7 +80,8 @@ const Entry = ({ entry }: { entry: TailEntry }) => {
       return (
         <details className="font-mono text-[13px] leading-[1.55] [&_summary::-webkit-details-marker]:hidden">
           <summary className="cursor-pointer list-none text-fg-3 hover:text-fg-2">
-            <span aria-hidden>✻ </span>Berpikir
+            <span aria-hidden>✻ </span>
+            {t("transcriptModal.thinking")}
           </summary>
           <div className="mt-1 pl-4 whitespace-pre-wrap text-fg-3">{entry.text}</div>
         </details>
@@ -78,9 +91,9 @@ const Entry = ({ entry }: { entry: TailEntry }) => {
         <ClaudeToolCall
           tool={entry.name || "tool"}
           arg={argSummary(entry.input)}
-          result={toolStatusText[entry.status]}
+          result={t(toolStatusKey[entry.status])}
           status={toolStatus[entry.status]}
-          expandHint="(klik untuk buka)"
+          expandHint={t("transcriptModal.expandHint")}
         >
           {entry.input}
         </ClaudeToolCall>
@@ -129,6 +142,7 @@ export const TranscriptModal = ({
   agentId?: string | null;
   onClose: () => void;
 }) => {
+  const t = useT();
   const [agent, setAgent] = useState<string | null>(agentId ?? null);
   const [entries, setEntries] = useState<TailEntry[]>([]);
   const [found, setFound] = useState(true);
@@ -157,7 +171,7 @@ export const TranscriptModal = ({
         })
         .catch((e: unknown) => {
           if (cancelled) return;
-          setError(typeof e === "string" ? e : "Gagal membaca transcript.");
+          setError(typeof e === "string" ? e : t("transcriptModal.readError"));
         });
     };
     tick();
@@ -228,7 +242,7 @@ export const TranscriptModal = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
       role="dialog"
       aria-modal="true"
-      aria-label={`Transcript ${session.project}`}
+      aria-label={t("transcriptModal.ariaLabel", { project: session.project })}
       onClick={onClose}
     >
       <div
@@ -257,20 +271,20 @@ export const TranscriptModal = ({
                 height={12}
                 className={session.status === "busy" ? "animate-spin [animation-duration:2s] motion-reduce:animate-none" : ""}
               />
-              {statusLabel[session.status]}
+              {t(statusLabel[session.status])}
             </span>
           ) : (
             <span
               className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${healthPill[session.health]}`}
             >
               <Icon icon={healthIcon[session.health]} width={12} height={12} />
-              {healthText[session.health]}
+              {t(healthText[session.health])}
             </span>
           )}
           <button
             type="button"
             onClick={onClose}
-            aria-label="Tutup"
+            aria-label={t("common.close")}
             className="shrink-0 cursor-pointer text-fg-3 hover:text-fg"
           >
             <Icon icon="lucide:x" width={16} height={16} />
@@ -279,7 +293,7 @@ export const TranscriptModal = ({
         {session.subagents.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-5 py-2.5">
             <Chip active={agent === null} onClick={() => setAgent(null)}>
-              Utama
+              {t("transcriptModal.main")}
             </Chip>
             {session.subagents.map((sub) => (
               <Chip
@@ -307,11 +321,9 @@ export const TranscriptModal = ({
             )}
             {entries.length === 0 &&
               (found ? (
-                <span className="py-6 text-center text-xs text-fg-3">{EMPTY_TEXT}</span>
+                <span className="py-6 text-center text-xs text-fg-3">{t("transcriptModal.emptyText")}</span>
               ) : (
-                <span className="py-6 text-center text-xs text-fg-3">
-                  Belum ada file transcript untuk sesi ini.
-                </span>
+                <span className="py-6 text-center text-xs text-fg-3">{t("transcriptModal.noFile")}</span>
               ))}
             {entries.map((entry, i) => (
               <Entry key={i} entry={entry} />
@@ -324,13 +336,13 @@ export const TranscriptModal = ({
               className="absolute right-5 bottom-3 flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[11.5px] font-semibold text-fg-2"
             >
               <Icon icon="lucide:arrow-down" width={12} height={12} />
-              Ke bawah
+              {t("transcriptModal.scrollToBottom")}
             </button>
           )}
         </div>
         <div className="flex items-center gap-2 border-t border-border px-5 py-2.5 text-[11.5px] text-fg-3">
           <Icon icon="lucide:eye-off" width={12} height={12} />
-          Hanya menampilkan bagian akhir transcript. Tidak ada yang disimpan.
+          {t("transcriptModal.footerHint")}
         </div>
       </div>
     </div>

@@ -180,7 +180,7 @@ export interface TermExitEvent {
 export type RecoverAction = "nudge" | "kill" | "restart";
 
 /** A refusal comes back as `ok: false` with a readable message, not as a thrown
- *  error, so "pid sudah bukan proses agent" reads as information. */
+ *  error, so "pid is no longer an agent process" reads as information. */
 export interface RecoverResult {
   ok: boolean;
   action: RecoverAction;

@@ -17,7 +17,7 @@ pub const PROBE_MAX_TOKENS: u32 = 512;
 const PROBE_PROMPT: &str = "Reply with exactly: ok";
 
 pub const REASONING_ONLY_ERROR: &str =
-    "model menjawab hanya dengan reasoning (kemungkinan max_tokens terlalu kecil)";
+    "the model replied with reasoning only (max_tokens may be too low)";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

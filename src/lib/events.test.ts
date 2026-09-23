@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { useLang } from "@/i18n";
 import { diffEvents } from "@/lib/events";
 import type { Session } from "@/lib/types";
 
@@ -14,28 +15,58 @@ const base: Session = {
   quietMs: 0, toolRunningMs: null, health: "ok", healthReason: null,
 };
 
+afterEach(() => useLang.setState({ lang: "en" }));
+
 test("first snapshot produces no events", () => {
   expect(diffEvents(null, [base], 1000)).toEqual([]);
 });
 
-test("new session emits a started event", () => {
-  const ev = diffEvents([], [base], 1000);
-  expect(ev).toHaveLength(1);
-  expect(ev[0].text).toBe("sesi dimulai");
-});
+describe("en", () => {
+  beforeEach(() => useLang.setState({ lang: "en" }));
 
-test("busy to waiting emits a needs-answer event", () => {
-  const ev = diffEvents([base], [{ ...base, status: "waiting" }], 2000);
-  expect(ev[0]).toMatchObject({ project: "noor", color: "waiting", text: "butuh jawaban" });
-});
-
-test("new session keeps its own status colour", () => {
-  const waitingSession = { ...base, id: "w", status: "waiting" as const };
-  expect(diffEvents([], [waitingSession], 1000)[0]).toMatchObject({
-    color: "waiting",
-    text: "sesi dimulai",
+  test("new session emits a started event", () => {
+    const ev = diffEvents([], [base], 1000);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].text).toBe("session started");
   });
-  expect(diffEvents([], [base], 1000)[0].color).toBe("busy");
+
+  test("busy to waiting emits a needs-answer event", () => {
+    const ev = diffEvents([base], [{ ...base, status: "waiting" }], 2000);
+    expect(ev[0]).toMatchObject({ project: "noor", color: "waiting", text: "needs an answer" });
+  });
+
+  test("new session keeps its own status colour", () => {
+    const waitingSession = { ...base, id: "w", status: "waiting" as const };
+    expect(diffEvents([], [waitingSession], 1000)[0]).toMatchObject({
+      color: "waiting",
+      text: "session started",
+    });
+    expect(diffEvents([], [base], 1000)[0].color).toBe("busy");
+  });
+});
+
+describe("id", () => {
+  beforeEach(() => useLang.setState({ lang: "id" }));
+
+  test("new session emits a started event", () => {
+    const ev = diffEvents([], [base], 1000);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].text).toBe("sesi dimulai");
+  });
+
+  test("busy to waiting emits a needs-answer event", () => {
+    const ev = diffEvents([base], [{ ...base, status: "waiting" }], 2000);
+    expect(ev[0]).toMatchObject({ project: "noor", color: "waiting", text: "butuh jawaban" });
+  });
+
+  test("new session keeps its own status colour", () => {
+    const waitingSession = { ...base, id: "w", status: "waiting" as const };
+    expect(diffEvents([], [waitingSession], 1000)[0]).toMatchObject({
+      color: "waiting",
+      text: "sesi dimulai",
+    });
+    expect(diffEvents([], [base], 1000)[0].color).toBe("busy");
+  });
 });
 
 test("new tool activity emits a tool event, unchanged activity emits nothing", () => {

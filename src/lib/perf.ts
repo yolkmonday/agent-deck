@@ -1,17 +1,18 @@
+import { locale, t } from "@/i18n";
 import type { PerfAgg } from "@/lib/api";
 
 export type PerfSortKey = "tpsP50" | "tpsP10" | "ttftP50Ms" | "samples";
 export const LOW_SAMPLES = 5;
-export const ESTIMATE_HINT = "Perkiraan dari timestamp sesi, termasuk waktu tunggu token pertama.";
 
-const oneDecimal = new Intl.NumberFormat("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const oneDecimal = (n: number) =>
+  new Intl.NumberFormat(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n);
 
-export const formatTps = (v: number, precise: boolean): string => `${precise ? "" : "~"}${oneDecimal.format(v)}`;
+export const formatTps = (v: number, precise: boolean): string => `${precise ? "" : "~"}${oneDecimal(v)}`;
 
 export const formatTtft = (ms: number | null): string => {
   if (ms === null) return "-";
   if (ms < 1000) return `${Math.round(ms)} ms`;
-  return `${oneDecimal.format(ms / 1000)} dtk`;
+  return t("format.seconds", { s: oneDecimal(ms / 1000) });
 };
 
 export const sortPerf = (rows: PerfAgg[], key: PerfSortKey, desc: boolean): PerfAgg[] =>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AttentionBar } from "@/components/AttentionBar";
 import { Sidebar } from "@/components/Sidebar";
+import { UpdateBanner } from "@/components/UpdateBanner";
 import {
   type JumpTarget,
   newlyStalled,
@@ -25,6 +26,7 @@ import { TokenPage } from "@/pages/TokenPage";
 import { focusInstance } from "@/lib/terminal-instances";
 import { useLive, startLive } from "@/store/live";
 import { startTerminalEvents, useTerminal } from "@/store/terminal";
+import { startAutoCheck } from "@/store/updater";
 
 // Stable reference: a fresh [] in the selector makes zustand see a new snapshot
 // on every render and loop forever while the first live snapshot is still null.
@@ -54,6 +56,8 @@ const App = () => {
       void stop.then((fn) => fn());
     };
   }, []);
+
+  useEffect(() => startAutoCheck(), []);
 
   useEffect(() => {
     settingsGet()
@@ -155,20 +159,26 @@ const App = () => {
   return (
     <NavProvider value={nav}>
       <div className="flex h-full flex-col">
+        <UpdateBanner />
         <AttentionBar
           sessions={waiting}
           unhealthy={unhealthy}
           orphans={orphans}
           nowMs={nowMs}
-          settings={settings}
           onJump={firstJump}
           onOpenTerminal={goToTerminal}
-          onMode={(mode) => saveSettings({ ...settings, attentionMode: mode })}
-          onNotifySound={(notifySound) => saveSettings({ ...settings, notifySound })}
-          onMinutes={(value) => saveSettings({ ...settings, ...value })}
         />
         <div className="flex min-h-0 flex-1">
-          <Sidebar page={page} onSelect={setPage} onJumpWaiting={firstJump} waitingCount={waiting.length} />
+          <Sidebar
+            page={page}
+            onSelect={setPage}
+            onJumpWaiting={firstJump}
+            waitingCount={waiting.length}
+            settings={settings}
+            onMode={(mode) => saveSettings({ ...settings, attentionMode: mode })}
+            onNotifySound={(notifySound) => saveSettings({ ...settings, notifySound })}
+            onMinutes={(value) => saveSettings({ ...settings, ...value })}
+          />
           <div key={page} className="ad-fade flex min-h-0 min-w-0 flex-1 flex-col">
             {page === "live" && (
               <LivePage

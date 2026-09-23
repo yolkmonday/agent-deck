@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AgentIcon } from "@/components/BrandIcon";
+import { locale, useT } from "@/i18n";
 import type { Agent } from "@/lib/types";
 import { useLive } from "@/store/live";
 
@@ -7,16 +8,17 @@ const dot = { waiting: "bg-waiting", busy: "bg-busy", ok: "bg-ok", idle: "bg-idl
 const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 
 const clock = (ms: number) =>
-  new Date(ms).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  new Date(ms).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 
-const FILTERS: { key: Agent | "all"; label: string }[] = [
-  { key: "all", label: "Semua" },
+const FILTERS: { key: Agent | "all"; label: string | null }[] = [
+  { key: "all", label: null },
   { key: "claude", label: "Claude" },
   { key: "opencode", label: "opencode" },
   { key: "codex", label: "Codex" },
 ];
 
 export const ActivityPage = () => {
+  const t = useT();
   const events = useLive((s) => s.events);
   const [filter, setFilter] = useState<Agent | "all">("all");
   const rows = filter === "all" ? events : events.filter((e) => e.agent === filter);
@@ -25,10 +27,10 @@ export const ActivityPage = () => {
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between px-7 py-4.5">
         <div className="flex flex-col gap-0.75">
-          <h1 className="text-[22px] font-semibold">Aktivitas</h1>
+          <h1 className="text-[22px] font-semibold">{t("activityPage.title")}</h1>
           <span className="flex items-center gap-2 text-[12.5px] text-fg-2">
             <span className="size-1.75 rounded-full bg-ok" />
-            {rows.length} kejadian sejak app dibuka
+            {t(rows.length === 1 ? "activityPage.events.one" : "activityPage.events.other", { n: rows.length })}
           </span>
         </div>
         <div className="flex items-center gap-0.5 rounded-lg border border-border bg-surface p-0.75">
@@ -41,7 +43,7 @@ export const ActivityPage = () => {
                 filter === f.key ? "bg-surface-2 font-semibold text-fg" : "font-medium text-fg-2"
               }`}
             >
-              {f.label}
+              {f.label ?? t("activityPage.filterAll")}
             </button>
           ))}
         </div>
@@ -50,7 +52,7 @@ export const ActivityPage = () => {
       <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-7 pb-7">
         {rows.length === 0 ? (
           <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-fg-3">
-            Belum ada kejadian. Aktivitas agent akan muncul di sini selama app terbuka.
+            {t("activityPage.empty")}
           </div>
         ) : (
           rows.map((e, i) => (

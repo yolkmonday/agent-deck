@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { useLang } from "@/i18n";
 import type { TermSession } from "@/lib/api";
 import {
   healthLabel,
@@ -105,7 +106,15 @@ describe("resolveTarget", () => {
 });
 
 describe("waitingLabel", () => {
-  test("formats project and duration", () => {
+  afterEach(() => useLang.setState({ lang: "en" }));
+
+  test("formats project and duration in English", () => {
+    const s = session({ project: "noor", updatedAtMs: 0 });
+    expect(waitingLabel(s, 8 * 60_000)).toBe("noor needs an answer · 8 min");
+  });
+
+  test("formats project and duration in Indonesian", () => {
+    useLang.setState({ lang: "id" });
     const s = session({ project: "noor", updatedAtMs: 0 });
     expect(waitingLabel(s, 8 * 60_000)).toBe("noor butuh jawaban · 8 mnt");
   });
@@ -132,7 +141,18 @@ describe("unhealthySessions", () => {
 });
 
 describe("healthLabel", () => {
-  test("formats stalled and slow", () => {
+  afterEach(() => useLang.setState({ lang: "en" }));
+
+  test("formats stalled and slow in English", () => {
+    const stalled = session({ project: "noor", health: "stalled", healthReason: "idle 9 min, no tool running" });
+    expect(healthLabel(stalled)).toBe("noor stalled · idle 9 min, no tool running");
+
+    const slow = session({ project: "kirimi", health: "slow", healthReason: 'tool "Bash" running 12 min' });
+    expect(healthLabel(slow)).toBe('kirimi slow · tool "Bash" running 12 min');
+  });
+
+  test("formats stalled and slow in Indonesian", () => {
+    useLang.setState({ lang: "id" });
     const stalled = session({
       project: "noor",
       health: "stalled",

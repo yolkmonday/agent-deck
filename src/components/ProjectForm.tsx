@@ -1,7 +1,9 @@
 import { Icon } from "@iconify/react";
 import { useEffect, useRef, useState } from "react";
+import { useT } from "@/i18n";
 import type { Project, ProjectInput, TermProfile } from "@/lib/api";
 import { pickFolder } from "@/lib/pick";
+import { PROJECT_ERRORS } from "@/lib/project-errors";
 
 export const PALETTE = [
   { value: "#4C9AFF", token: "bg-busy" },
@@ -40,6 +42,7 @@ export const ProjectForm = ({
   onSubmit: (input: ProjectInput) => void;
   onCancel: () => void;
 }) => {
+  const t = useT();
   const [draft, setDraft] = useState<ProjectInput>(blank(nextSortOrder));
   const [picking, setPicking] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
@@ -72,7 +75,7 @@ export const ProjectForm = ({
     try {
       const typed = draft.path.trim();
       const picked = await pickFolder({
-        title: "Pilih folder project",
+        title: t("projectForm.pickFolderTitle"),
         defaultPath: typed.startsWith("/") ? typed : undefined,
       });
       if (picked === null) return;
@@ -92,9 +95,12 @@ export const ProjectForm = ({
     }
   };
 
-  const nameInvalid = error === "nama tidak boleh kosong" || error === "nama terlalu panjang";
-  const pathInvalid = error === "path harus absolut" || error === "folder tidak ditemukan" || error === "project dengan folder ini sudah ada";
-  const profileInvalid = error === "profil tidak dikenal";
+  const nameInvalid = error === PROJECT_ERRORS.nameEmpty || error === PROJECT_ERRORS.nameTooLong;
+  const pathInvalid =
+    error === PROJECT_ERRORS.pathNotAbsolute ||
+    error === PROJECT_ERRORS.folderNotFound ||
+    error === PROJECT_ERRORS.folderAlreadyUsed;
+  const profileInvalid = error === PROJECT_ERRORS.profileUnknown;
 
   const canSave = draft.name.trim() !== "" && draft.path.trim() !== "" && !busy;
 
@@ -102,7 +108,7 @@ export const ProjectForm = ({
     <section className="flex w-90 shrink-0 flex-col gap-4">
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold">
-          {editing === null || editing.id === "" ? "Project baru" : "Ubah project"}
+          {editing === null || editing.id === "" ? t("projectForm.newProject") : t("projectForm.editProject")}
         </span>
         {editing !== null && (
           <button
@@ -110,13 +116,13 @@ export const ProjectForm = ({
             onClick={onCancel}
             className="ad-interactive ad-press cursor-pointer rounded-md px-2 py-1 text-xs text-fg-3 hover:text-fg"
           >
-            Batal
+            {t("common.cancel")}
           </button>
         )}
       </div>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-xs text-fg-3">Nama</span>
+        <span className="text-xs text-fg-3">{t("projectForm.nameLabel")}</span>
         <input
           value={draft.name}
           onChange={(e) => patch({ name: e.target.value })}
@@ -127,7 +133,7 @@ export const ProjectForm = ({
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-xs text-fg-3">Folder</span>
+        <span className="text-xs text-fg-3">{t("projectForm.folderLabel")}</span>
         <div className="flex items-center gap-2">
           <input
             value={draft.path}
@@ -142,36 +148,38 @@ export const ProjectForm = ({
             className="ad-interactive ad-press flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-[11.5px] font-medium text-fg-2 hover:text-fg disabled:cursor-default disabled:opacity-45"
           >
             <Icon icon="lucide:folder-open" width={13} height={13} />
-            {picking ? "Membuka…" : "Pilih folder…"}
+            {picking ? t("projectForm.opening") : t("projectForm.pickFolder")}
           </button>
         </div>
-        <span className="text-[11.5px] text-fg-3">Boleh pakai ~. Folder harus ada saat disimpan.</span>
+        <span className="text-[11.5px] text-fg-3">{t("projectForm.folderHint")}</span>
         {pathInvalid && <span className="text-[11.5px] text-err">{error}</span>}
         {pickError !== null && (
-          <span className="font-mono text-[11.5px] text-err">Gagal membuka Finder: {pickError}</span>
+          <span className="font-mono text-[11.5px] text-err">
+            {t("projectForm.finderError", { message: pickError })}
+          </span>
         )}
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-xs text-fg-3">Profil default</span>
+        <span className="text-xs text-fg-3">{t("projectForm.defaultProfileLabel")}</span>
         <select
           value={draft.defaultProfile ?? ""}
           onChange={(e) => patch({ defaultProfile: e.target.value === "" ? null : e.target.value })}
           className={`${field} cursor-pointer`}
         >
-          <option value="">Tidak ada</option>
+          <option value="">{t("projectForm.noneOption")}</option>
           {profiles.map((p) => (
             <option key={p.id} value={p.id}>
               {p.label}
             </option>
           ))}
         </select>
-        <span className="text-[11.5px] text-fg-3">Dipakai saat mulai sesi dari project ini.</span>
+        <span className="text-[11.5px] text-fg-3">{t("projectForm.profileHint")}</span>
         {profileInvalid && <span className="text-[11.5px] text-err">{error}</span>}
       </label>
 
       <div className="flex flex-col gap-1.5">
-        <span className="text-xs text-fg-3">Warna</span>
+        <span className="text-xs text-fg-3">{t("projectForm.colorLabel")}</span>
         <div className="flex flex-wrap items-center gap-2">
           {PALETTE.map((p) => (
             <button
@@ -191,7 +199,7 @@ export const ProjectForm = ({
               draft.color === null ? "border-fg text-fg" : "border-border text-fg-3"
             }`}
           >
-            tanpa warna
+            {t("projectForm.noColor")}
           </button>
         </div>
       </div>
@@ -203,9 +211,9 @@ export const ProjectForm = ({
           onClick={() => onSubmit({ ...draft, name: draft.name.trim(), path: draft.path.trim() })}
           className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
         >
-          {busy ? "Menyimpan…" : editing === null ? "Tambah" : "Simpan"}
+          {busy ? t("projectForm.saving") : editing === null ? t("common.add") : t("common.save")}
         </button>
-        <span className="text-[11.5px] text-fg-3">Perubahan hanya di Agent Deck, bukan di disk.</span>
+        <span className="text-[11.5px] text-fg-3">{t("projectForm.localOnlyHint")}</span>
       </div>
     </section>
   );

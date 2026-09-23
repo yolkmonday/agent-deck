@@ -5,8 +5,6 @@ export interface LimitPair {
   output: number;
 }
 
-export const DEFAULT_LIMITS_NOTE = "Angka ini perkiraan. Sesuaikan dengan dokumentasi provider.";
-
 const LIMIT_RULES: { match: string[]; limits: LimitPair }[] = [
   { match: ["claude"], limits: { context: 200000, output: 64000 } },
   { match: ["gpt", "codex", "openai"], limits: { context: 128000, output: 16384 } },

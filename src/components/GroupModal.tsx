@@ -2,12 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 import { AgentIcon } from "@/components/BrandIcon";
 import { TranscriptModal } from "@/components/TranscriptModal";
+import { useT, type MessageKey } from "@/i18n";
 import { activityText } from "@/lib/activity";
-import { formatNotional, formatUsd, NOTIONAL_HINT } from "@/lib/cost";
+import { formatNotional, formatUsd } from "@/lib/cost";
 import { formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session } from "@/lib/types";
 
-const statusLabel = { busy: "Sibuk", waiting: "Menunggu", idle: "Diam" } as const;
+const statusLabel: Record<"busy" | "waiting" | "idle", MessageKey> = {
+  busy: "groupModal.statusBusy",
+  waiting: "groupModal.statusWaiting",
+  idle: "groupModal.statusIdle",
+};
 const statusPill = {
   busy: "bg-busy/15 text-busy",
   waiting: "bg-waiting/15 text-waiting",
@@ -20,7 +25,10 @@ const statusIcon = {
 } as const;
 const healthPill = { stalled: "bg-err/15 text-err", slow: "bg-waiting/15 text-waiting" } as const;
 const healthIcon = { stalled: "lucide:octagon-alert", slow: "lucide:hourglass" } as const;
-const healthText = { stalled: "Macet", slow: "Lambat" } as const;
+const healthText: Record<"stalled" | "slow", MessageKey> = {
+  stalled: "groupModal.healthStalled",
+  slow: "groupModal.healthSlow",
+};
 const agentText = { claude: "text-claude", opencode: "text-opencode", codex: "text-codex" } as const;
 
 const Row = ({
@@ -32,6 +40,7 @@ const Row = ({
   onOpenTerminal: (id?: string) => void;
   onOpenTranscript: (s: Session) => void;
 }) => {
+  const t = useT();
   const act = activityText(s);
   return (
     <div className="flex min-w-0 items-center gap-3 border-b border-border py-3 last:border-0">
@@ -91,25 +100,25 @@ const Row = ({
           className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${statusPill[s.status]}`}
         >
           <Icon icon={statusIcon[s.status]} width={12} height={12} />
-          {statusLabel[s.status]}
+          {t(statusLabel[s.status])}
         </span>
       ) : (
         <span
           className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.25 py-0.75 text-[11.5px] font-semibold ${healthPill[s.health]}`}
         >
           <Icon icon={healthIcon[s.health]} width={12} height={12} />
-          {healthText[s.health]}
+          {t(healthText[s.health])}
         </span>
       )}
       <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-2">
         {formatTokens(totalTokens(s.tokens))}
       </span>
       {!s.priced ? (
-        <span className="shrink-0 font-mono text-[11.5px] text-fg-3" title="Model ini belum ada di tabel harga.">
+        <span className="shrink-0 font-mono text-[11.5px] text-fg-3" title={t("groupModal.priceMissing")}>
           -
         </span>
       ) : s.billingMode === "subscription" ? (
-        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-3" title={NOTIONAL_HINT}>
+        <span className="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-fg-3" title={t("cost.notionalHint")}>
           {formatNotional(s.costUsd)}
         </span>
       ) : (
@@ -123,7 +132,7 @@ const Row = ({
         }}
         className="ad-interactive ad-press shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] font-semibold text-fg-2 hover:border-fg-3 hover:text-fg"
       >
-        Terminal
+        {t("groupModal.terminal")}
       </button>
     </div>
   );
@@ -140,6 +149,7 @@ export const GroupModal = ({
   onClose: () => void;
   onOpenTerminal: (sessionId?: string) => void;
 }) => {
+  const t = useT();
   const [transcript, setTranscript] = useState<Session | null>(null);
   // Both modals listen for Escape. The transcript's handler closes it and
   // clears its own state, so by the time this handler runs the transcript is
@@ -167,7 +177,7 @@ export const GroupModal = ({
       className="ad-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
       role="dialog"
       aria-modal="true"
-      aria-label={`Sesi lain di ${label}`}
+      aria-label={t("groupModal.ariaLabel", { label })}
       onClick={onClose}
     >
       <div
@@ -178,12 +188,16 @@ export const GroupModal = ({
           <span className="flex items-center gap-2 text-sm font-semibold">
             <Icon icon="lucide:folder-git-2" width={14} height={14} className="text-fg-3" />
             {label}
-            <span className="font-normal text-fg-3">· {sessions.length} sesi lain</span>
+            <span className="font-normal text-fg-3">
+              {t(sessions.length === 1 ? "groupModal.otherSessionsCount.one" : "groupModal.otherSessionsCount.other", {
+                n: sessions.length,
+              })}
+            </span>
           </span>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Tutup"
+            aria-label={t("common.close")}
             className="ad-interactive ad-press cursor-pointer text-fg-3 hover:text-fg"
           >
             <Icon icon="lucide:x" width={16} height={16} />
