@@ -1,13 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ChevronRight } from "lucide-react";
 import { ProviderIcon } from "@/components/BrandIcon";
+import { useT, type MessageKey } from "@/i18n";
 import type { OcAuth, OcProvider } from "@/lib/api";
 import { secretMigrateInline } from "@/lib/api";
 
-const AUTH_LABEL: Record<OcAuth, string> = {
-  config: "config",
-  cli: "CLI",
-  none: "belum ada",
+const AUTH_LABEL: Record<OcAuth, MessageKey> = {
+  config: "providerTable.authConfig",
+  cli: "providerTable.authCli",
+  none: "providerTable.authNone",
 };
 
 const AUTH_TONE: Record<OcAuth, string> = {
@@ -29,6 +30,7 @@ export const ProviderTable = ({
   providers: OcProvider[];
   onOpen: (id: string) => void;
 }) => {
+  const t = useT();
   const qc = useQueryClient();
   const migrate = useMutation({
     mutationFn: (id: string) => secretMigrateInline(id),
@@ -39,7 +41,7 @@ export const ProviderTable = ({
   if (providers.length === 0) {
     return (
       <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-fg-3">
-        Belum ada provider opencode di config global.
+        {t("providerTable.empty")}
       </div>
     );
   }
@@ -49,11 +51,11 @@ export const ProviderTable = ({
       <table className="w-full border-collapse">
         <thead>
           <tr className="border-b border-border">
-            <Head>Provider</Head>
-            <Head>Auth</Head>
-            <Head right>Model</Head>
-            <Head>Contoh model</Head>
-            <Head right>Status</Head>
+            <Head>{t("providerTable.headProvider")}</Head>
+            <Head>{t("providerTable.headAuth")}</Head>
+            <Head right>{t("providerTable.headModel")}</Head>
+            <Head>{t("providerTable.headExampleModels")}</Head>
+            <Head right>{t("providerTable.headStatus")}</Head>
             <th />
           </tr>
         </thead>
@@ -77,7 +79,7 @@ export const ProviderTable = ({
                 </td>
                 <td className="py-3 pr-4">
                   <div className="flex flex-col gap-1">
-                    <span className={`text-[12.5px] ${AUTH_TONE[p.auth]}`}>{AUTH_LABEL[p.auth]}</span>
+                    <span className={`text-[12.5px] ${AUTH_TONE[p.auth]}`}>{t(AUTH_LABEL[p.auth])}</span>
                     {p.keyMasked && (
                       <span className="font-mono text-[11.5px] text-fg-3">{p.keyMasked}</span>
                     )}
@@ -104,11 +106,11 @@ export const ProviderTable = ({
                 </td>
                 <td className="py-3 pr-4 text-right">
                   {!p.enabled ? (
-                    <span className="text-[11.5px] text-fg-3">nonaktif</span>
+                    <span className="text-[11.5px] text-fg-3">{t("providerTable.disabled")}</span>
                   ) : p.keyInline ? (
-                    <span className="text-[11.5px] font-medium text-waiting">plaintext</span>
+                    <span className="text-[11.5px] font-medium text-waiting">{t("providerTable.plaintext")}</span>
                   ) : (
-                    <span className="text-[11.5px] text-ok">aktif</span>
+                    <span className="text-[11.5px] text-ok">{t("providerTable.active")}</span>
                   )}
                 </td>
                 <td className="py-3 text-right">
@@ -135,7 +137,7 @@ export const ProviderTable = ({
           >
             <AlertTriangle size={14} className="shrink-0 text-waiting" />
             <span className="flex-1 text-[12px] text-fg-2">
-              <span className="font-mono text-fg">{p.id}</span> — Key masih plaintext
+              <span className="font-mono text-fg">{p.id}</span> {t("providerTable.keyPlaintext")}
             </span>
             <button
               type="button"
@@ -143,7 +145,7 @@ export const ProviderTable = ({
               onClick={() => migrate.mutate(p.id)}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-waiting/50 px-2.5 py-1 text-[11.5px] font-medium text-waiting hover:bg-waiting/10 disabled:cursor-default disabled:opacity-45"
             >
-              {busyId === p.id ? "Memindahkan…" : "Pindahkan ke file 0600"}
+              {busyId === p.id ? t("providerTable.migrating") : t("providerTable.moveToFile")}
             </button>
           </div>
         ))}

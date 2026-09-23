@@ -1,14 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useT, type MessageKey } from "@/i18n";
 import { pricingGet, pricingSet, type PriceEntry } from "@/lib/api";
 
 const COLUMNS = [
-  { key: "model", label: "Model", width: "w-56" },
-  { key: "inputPerM", label: "Input", width: "w-24" },
-  { key: "outputPerM", label: "Output", width: "w-24" },
-  { key: "cacheReadPerM", label: "Cache read", width: "w-24" },
-  { key: "cacheWritePerM", label: "Cache write", width: "w-24" },
-] as const;
+  { key: "model", labelKey: "pricingDialog.columnModel", width: "w-56" },
+  { key: "inputPerM", labelKey: "pricingDialog.columnInput", width: "w-24" },
+  { key: "outputPerM", labelKey: "pricingDialog.columnOutput", width: "w-24" },
+  { key: "cacheReadPerM", labelKey: "pricingDialog.columnCacheRead", width: "w-24" },
+  { key: "cacheWritePerM", labelKey: "pricingDialog.columnCacheWrite", width: "w-24" },
+] satisfies { key: string; labelKey: MessageKey; width: string }[];
 
 type Row = Record<(typeof COLUMNS)[number]["key"], string>;
 
@@ -31,6 +32,7 @@ const valid = (r: Row) =>
 const blank = (): Row => toRow({ model: "", inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0 });
 
 export const PricingDialog = ({ onClose }: { onClose: () => void }) => {
+  const t = useT();
   const qc = useQueryClient();
   const [rows, setRows] = useState<Row[] | null>(null);
   const query = useQuery({ queryKey: ["pricing"], queryFn: pricingGet });
@@ -72,15 +74,15 @@ export const PricingDialog = ({ onClose }: { onClose: () => void }) => {
       >
         <div className="flex items-start justify-between">
           <div className="flex flex-col gap-1">
-            <h2 className="text-base font-semibold">Harga model</h2>
-            <span className="text-xs text-fg-2">USD per satu juta token.</span>
+            <h2 className="text-base font-semibold">{t("pricingDialog.title")}</h2>
+            <span className="text-xs text-fg-2">{t("pricingDialog.subtitle")}</span>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="ad-interactive ad-press cursor-pointer rounded-md px-2 py-1 text-xs text-fg-3 hover:text-fg"
           >
-            Tutup
+            {t("common.close")}
           </button>
         </div>
 
@@ -91,7 +93,7 @@ export const PricingDialog = ({ onClose }: { onClose: () => void }) => {
         )}
 
         {rows === null ? (
-          <div className="py-8 text-center text-sm text-fg-3">Memuat harga…</div>
+          <div className="py-8 text-center text-sm text-fg-3">{t("pricingDialog.loadingPrices")}</div>
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <table className="w-full border-collapse">
@@ -99,7 +101,7 @@ export const PricingDialog = ({ onClose }: { onClose: () => void }) => {
                 <tr className="border-b border-border">
                   {COLUMNS.map((c) => (
                     <th key={c.key} className="pb-2.5 text-left text-[11px] font-medium text-fg-3">
-                      {c.label}
+                      {t(c.labelKey)}
                     </th>
                   ))}
                   <th />
@@ -128,26 +130,26 @@ export const PricingDialog = ({ onClose }: { onClose: () => void }) => {
                         onClick={() => setRows((prev) => prev?.filter((_, idx) => idx !== i) ?? prev)}
                         className="ad-interactive ad-press cursor-pointer rounded-md px-2 py-1 text-xs text-fg-3 hover:bg-err/10 hover:text-err"
                       >
-                        Hapus
+                        {t("common.delete")}
                       </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!allValid && <span className="mt-2 block text-xs text-err">Harus angka</span>}
+            {!allValid && <span className="mt-2 block text-xs text-err">{t("pricingDialog.mustBeNumber")}</span>}
           </div>
         )}
 
         <div className="flex items-center justify-between border-t border-border pt-4">
-          <span className="text-xs text-fg-3">Harga ini perkiraan. Sesuaikan dengan tagihan asli kamu.</span>
+          <span className="text-xs text-fg-3">{t("pricingDialog.disclaimer")}</span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setRows((prev) => [...(prev ?? []), blank()])}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-3 py-1.75 text-xs font-medium text-fg-2 hover:border-fg-3 hover:text-fg"
             >
-              Tambah model
+              {t("pricingDialog.addModel")}
             </button>
             <button
               type="button"
@@ -155,7 +157,7 @@ export const PricingDialog = ({ onClose }: { onClose: () => void }) => {
               onClick={submit}
               className="ad-interactive ad-press cursor-pointer rounded-md bg-busy px-4 py-1.75 text-xs font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
             >
-              {save.isPending ? "Menyimpan…" : "Simpan"}
+              {save.isPending ? t("pricingDialog.saving") : t("common.save")}
             </button>
           </div>
         </div>

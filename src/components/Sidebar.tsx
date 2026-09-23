@@ -1,4 +1,5 @@
 import { Radar } from "lucide-react";
+import { useT } from "@/i18n";
 import { NAV_ITEMS, type PageKey } from "@/lib/nav";
 
 export const Sidebar = ({
@@ -12,6 +13,7 @@ export const Sidebar = ({
   onJumpWaiting: () => void;
   waitingCount: number;
 }) => {
+  const t = useT();
   return (
     <aside className="flex w-58 shrink-0 flex-col border-r border-border">
       <div className="flex items-center gap-2.5 px-5 py-5.5">
@@ -35,7 +37,7 @@ export const Sidebar = ({
                 <span
                   role="button"
                   tabIndex={0}
-                  title="Buka sesi yang menunggu"
+                  title={t("sidebar.openWaitingTitle")}
                   onClick={(e) => {
                     e.stopPropagation();
                     onJumpWaiting();
@@ -47,7 +49,7 @@ export const Sidebar = ({
                   }}
                   className="ad-interactive ad-press cursor-pointer rounded-full bg-waiting px-1.75 py-0.5 text-[11px] font-semibold text-bg hover:opacity-90"
                 >
-                  {waitingCount} tunggu
+                  {t("sidebar.waitingCount", { count: waitingCount })}
                 </span>
               )}
             </button>

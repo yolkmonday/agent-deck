@@ -1,5 +1,6 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { t as translate, useT } from "@/i18n";
 import type { Project } from "@/lib/api";
 import { PALETTE } from "@/components/ProjectForm";
 import { formatDuration } from "@/lib/format";
@@ -8,7 +9,9 @@ const swatch = (color: string | null) =>
   PALETTE.find((p) => p.value.toUpperCase() === color?.toUpperCase())?.token ?? null;
 
 const lastUsed = (ms: number | null) =>
-  ms === null ? "belum pernah" : `${formatDuration(Date.now() - ms)} lalu`;
+  ms === null
+    ? translate("projectList.neverUsed")
+    : translate("projectList.lastUsedAgo", { duration: formatDuration(Date.now() - ms) });
 
 export const ProjectList = ({
   projects,
@@ -25,6 +28,7 @@ export const ProjectList = ({
   onDelete: (id: string) => void;
   onMove: (project: Project, direction: -1 | 1) => void;
 }) => {
+  const t = useT();
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,7 +38,7 @@ export const ProjectList = ({
   if (projects.length === 0) {
     return (
       <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-fg-3">
-        Belum ada project. Tambahkan satu, atau pakai saran di bawah.
+        {t("projectList.empty")}
       </div>
     );
   }
@@ -55,13 +59,13 @@ export const ProjectList = ({
               <span className="truncate text-[13px] font-medium text-fg">{p.name}</span>
               {!p.exists && (
                 <span className="shrink-0 rounded border border-err/40 bg-err/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-err">
-                  Folder hilang
+                  {t("projectList.folderMissing")}
                 </span>
               )}
             </div>
             <span className="truncate font-mono text-[11.5px] text-fg-3">{p.path}</span>
             <span className="text-[11.5px] text-fg-3">
-              {p.defaultProfile ?? "tanpa profil default"} · {lastUsed(p.lastUsedMs)}
+              {p.defaultProfile ?? t("projectList.noDefaultProfile")} · {lastUsed(p.lastUsedMs)}
             </span>
           </div>
 
@@ -72,7 +76,7 @@ export const ProjectList = ({
               onClick={() => onMove(p, -1)}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2 py-1 text-[11.5px] text-fg-2 hover:border-fg-3 hover:text-fg disabled:cursor-default disabled:opacity-35"
             >
-              Naik
+              {t("projectList.moveUp")}
             </button>
             <button
               type="button"
@@ -80,12 +84,12 @@ export const ProjectList = ({
               onClick={() => onMove(p, 1)}
               className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2 py-1 text-[11.5px] text-fg-2 hover:border-fg-3 hover:text-fg disabled:cursor-default disabled:opacity-35"
             >
-              Turun
+              {t("projectList.moveDown")}
             </button>
             <button
               type="button"
               onClick={() => onEdit(p)}
-              aria-label="Ubah"
+              aria-label={t("common.edit")}
               className="ad-interactive ad-press cursor-pointer rounded-md p-1.5 text-fg-3 hover:bg-surface-2 hover:text-fg"
             >
               <Pencil size={14} />
@@ -101,21 +105,21 @@ export const ProjectList = ({
                   }}
                   className="ad-interactive ad-press cursor-pointer rounded-md bg-err px-2.5 py-1 text-[11.5px] font-semibold text-bg hover:opacity-90 disabled:cursor-default disabled:opacity-45"
                 >
-                  Yakin?
+                  {t("projectList.confirmDelete")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setPendingDelete(null)}
                   className="ad-interactive ad-press cursor-pointer rounded-md border border-border px-2.5 py-1 text-[11.5px] text-fg-2 hover:border-fg-3 hover:text-fg"
                 >
-                  Batal
+                  {t("common.cancel")}
                 </button>
               </div>
             ) : (
               <button
                 type="button"
                 onClick={() => setPendingDelete(p.id)}
-                aria-label="Hapus"
+                aria-label={t("common.delete")}
                 className="ad-interactive ad-press cursor-pointer rounded-md p-1.5 text-fg-3 hover:bg-err/10 hover:text-err"
               >
                 <Trash2 size={14} />
@@ -124,7 +128,7 @@ export const ProjectList = ({
           </div>
         </div>
       ))}
-      <span className="pt-2 text-[11.5px] text-fg-3">Folder aslinya tidak ikut terhapus.</span>
+      <span className="pt-2 text-[11.5px] text-fg-3">{t("projectList.folderKept")}</span>
     </div>
   );
 };
