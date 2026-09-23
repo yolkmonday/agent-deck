@@ -12,4 +12,5 @@ pub mod savings;
 pub mod store;
 pub mod subagent;
 pub mod tail;
+pub mod task_text;
 pub mod transcript;

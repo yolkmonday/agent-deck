@@ -4,7 +4,7 @@ import type { Session } from "@/lib/types";
 
 const base: Session = {
   id: "a", agent: "claude", pid: 1, project: "noor", cwd: "/noor",
-  group: "noor", groupRoot: "/noor", isWorktree: false, worktreeName: null, model: null, branch: null,
+  group: "noor", groupRoot: "/noor", isWorktree: false, worktreeName: null, task: null, model: null, branch: null,
   status: "busy", activity: null,
   tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
   ownTokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },

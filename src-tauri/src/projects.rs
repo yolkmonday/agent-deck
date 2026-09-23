@@ -384,6 +384,7 @@ mod tests {
                     group_root: (*cwd).into(),
                     is_worktree: false,
                     worktree_name: None,
+                    task: None,
                     model: None,
                     branch: None,
                     status: collector::model::Status::Idle,

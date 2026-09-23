@@ -84,6 +84,9 @@ pub struct Session {
     pub group_root: String,
     pub is_worktree: bool,
     pub worktree_name: Option<String>,
+    /// What the session is for: opencode's session title, or Claude's AI title
+    /// falling back to its first real prompt. `None` until either exists.
+    pub task: Option<String>,
     pub model: Option<String>,
     pub branch: Option<String>,
     pub status: Status,
@@ -165,6 +168,7 @@ mod tests {
         let s = Session {
             id: "s1".into(), agent: Agent::Claude, pid: Some(1), project: "p".into(), cwd: "/p".into(),
             group: "p".into(), group_root: "/p".into(), is_worktree: false, worktree_name: None,
+            task: None,
             model: None, branch: None, status: Status::Waiting, activity: None,
             tokens: TokenUsage::default(), own_tokens: TokenUsage::default(), subagents: vec![],
             cost_usd: 0.0, billing_mode: BillingMode::Payg, priced: false,
@@ -179,6 +183,7 @@ mod tests {
         assert_eq!(v["groupRoot"], "/p");
         assert_eq!(v["isWorktree"], false);
         assert_eq!(v["worktreeName"], serde_json::Value::Null);
+        assert_eq!(v["task"], serde_json::Value::Null);
         assert_eq!(v["tokens"]["cacheRead"], 0);
         assert_eq!(v["ownTokens"]["cacheRead"], 0);
         assert_eq!(v["subagents"], serde_json::json!([]));

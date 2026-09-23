@@ -4,6 +4,7 @@ import { AgentIcon } from "@/components/BrandIcon";
 import { ClaudeThinking } from "@/components/brainless/claude/claude-thinking";
 import { RecoverMenu } from "@/components/RecoverMenu";
 import { TranscriptModal } from "@/components/TranscriptModal";
+import { activityText } from "@/lib/activity";
 import { formatUsd, formatNotional, NOTIONAL_HINT } from "@/lib/cost";
 import { formatDuration, formatShort, formatTokens, totalTokens } from "@/lib/format";
 import type { Session, SubAgent } from "@/lib/types";
@@ -29,15 +30,6 @@ const healthIcon = { stalled: "lucide:octagon-alert", slow: "lucide:hourglass" }
 // so the board never shows three different greens for three very different states.
 const healthPill = { stalled: "bg-err/15 text-err", slow: "bg-waiting/15 text-waiting" } as const;
 const healthText = { stalled: "Macet", slow: "Lambat" } as const;
-
-const activityText = (s: Session): { label: string; detail: string | null } => {
-  const a = s.activity;
-  if (!a) return { label: "Diam", detail: null };
-  if (a.kind === "waiting") return { label: "Menunggu jawaban kamu", detail: a.detail };
-  if (a.kind === "thinking") return { label: "Berpikir", detail: null };
-  if (a.kind === "done") return { label: "Selesai", detail: null };
-  return { label: a.label, detail: a.detail };
-};
 
 const SubAgentRow = ({ sub }: { sub: SubAgent }) => (
   <div className="flex min-w-0 items-center gap-2 pt-1.5">
@@ -181,6 +173,11 @@ export const SessionCard = ({
         <span className="truncate font-mono text-[11.5px] text-fg-3" title={s.cwd}>
           {s.cwd}
         </span>
+        {s.task && (
+          <span className="truncate text-[12px] text-fg-2" title={s.task}>
+            {s.task}
+          </span>
+        )}
         <span className="flex min-w-0 items-center gap-1 text-xs text-fg-2">
           <span className="truncate">
             {[s.model, s.branch].filter(Boolean).join(" · ") || "-"}

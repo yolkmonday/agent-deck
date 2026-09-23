@@ -1,4 +1,5 @@
 use crate::model::TokenUsage;
+use crate::task_text::one_line;
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -8,6 +9,12 @@ use std::path::{Path, PathBuf};
 
 const CHUNK: u64 = 16 * 1024 * 1024;
 const DETAIL_MAX: usize = 80;
+const TASK_MAX: usize = 120;
+
+/// Prompt-shaped user text that is not the user's own words. Claude writes a
+/// slash command, a hook, or injected context as a `user` record too.
+const PROMPT_SKIP_PREFIXES: [&str; 4] =
+    ["<command-", "<local-command-", "<system-reminder>", "Caveat:"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCall {
@@ -38,6 +45,20 @@ pub struct TranscriptState {
     /// Timestamp of the very first record this tailer ever parsed, so a
     /// subagent can be ordered by when it was spawned.
     pub started_ms: Option<i64>,
+    /// Claude's own summary of the session, from an `ai-title` record. The
+    /// latest one wins, because the title is rewritten as the work moves on.
+    pub ai_title: Option<String>,
+    /// The first real user prompt, kept as the fallback title. Written once and
+    /// never overwritten.
+    pub first_prompt: Option<String>,
+}
+
+impl TranscriptState {
+    /// What the session is for: Claude's own title when it has one, otherwise
+    /// the first thing the user actually asked.
+    pub fn task(&self) -> Option<String> {
+        self.ai_title.clone().or_else(|| self.first_prompt.clone())
+    }
 }
 
 pub fn encode_cwd(cwd: &str) -> String {
@@ -138,6 +159,12 @@ impl TranscriptState {
         match v.get("type").and_then(Value::as_str) {
             Some("assistant") => self.apply_assistant(v),
             Some("user") => self.apply_user(v),
+            Some("ai-title") => {
+                let title = v.get("aiTitle").and_then(Value::as_str).map(str::trim).unwrap_or("");
+                if !title.is_empty() {
+                    self.ai_title = Some(title.to_string());
+                }
+            }
             Some("system") => {
                 if v.get("subtype").and_then(Value::as_str) == Some("turn_duration") {
                     self.turn_ended = true;
@@ -185,6 +212,7 @@ impl TranscriptState {
 
     fn apply_user(&mut self, v: &Value) {
         self.turn_ended = false;
+        self.capture_first_prompt(v);
         if let Some(id) = v
             .get("toolUseResult")
             .and_then(|r| r.get("agentId"))
@@ -206,6 +234,39 @@ impl TranscriptState {
                 self.pending_tool_id = None;
                 self.tool_started_ms = None;
             }
+        }
+    }
+
+    /// The first thing the user typed, used when Claude has not titled the
+    /// session yet. Only ever set once: a later prompt is a follow-up, not the
+    /// task.
+    fn capture_first_prompt(&mut self, v: &Value) {
+        if self.first_prompt.is_some() {
+            return;
+        }
+        if v.get("isMeta").and_then(Value::as_bool).unwrap_or(false) {
+            return;
+        }
+        let Some(content) = v.get("message").and_then(|m| m.get("content")) else { return };
+        let text = match content {
+            Value::String(s) => s.as_str(),
+            Value::Array(items) => match items
+                .iter()
+                .find(|i| i.get("type").and_then(Value::as_str) == Some("text"))
+                .and_then(|i| i.get("text"))
+                .and_then(Value::as_str)
+            {
+                Some(t) => t,
+                None => return,
+            },
+            _ => return,
+        };
+        if PROMPT_SKIP_PREFIXES.iter().any(|p| text.trim_start().starts_with(p)) {
+            return;
+        }
+        let task = one_line(text, TASK_MAX);
+        if !task.is_empty() {
+            self.first_prompt = Some(task);
         }
     }
 }
@@ -384,5 +445,106 @@ mod tests {
         assert!(find_transcript(projects, "/Users/yolk/Dev/kirimi", "s1").is_some());
         assert!(find_transcript(projects, "/Users/yolk/Dev/kirimi", "s2").is_some());
         assert!(find_transcript(projects, "/Users/yolk/Dev/kirimi", "nope").is_none());
+    }
+
+    fn advance_lines(lines: &[&str]) -> TranscriptState {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("s.jsonl");
+        append(&p, &format!("{}\n", lines.join("\n")));
+        let mut st = TranscriptState::default();
+        st.advance(&p).unwrap();
+        st
+    }
+
+    #[test]
+    fn ai_title_becomes_the_task() {
+        let st = advance_lines(&[r#"{"type":"ai-title","aiTitle":"Perbaiki halaman login"}"#]);
+        assert_eq!(st.task().as_deref(), Some("Perbaiki halaman login"));
+    }
+
+    #[test]
+    fn the_latest_ai_title_wins() {
+        let st = advance_lines(&[
+            r#"{"type":"ai-title","aiTitle":"Judul lama"}"#,
+            r#"{"type":"assistant","message":{"id":"m1","usage":{"output_tokens":1}}}"#,
+            r#"{"type":"ai-title","aiTitle":"Judul baru"}"#,
+        ]);
+        assert_eq!(st.task().as_deref(), Some("Judul baru"));
+    }
+
+    #[test]
+    fn ai_title_wins_over_the_first_prompt() {
+        let st = advance_lines(&[
+            r#"{"type":"user","message":{"content":"tolong tambah tombol"}}"#,
+            r#"{"type":"ai-title","aiTitle":"Tambah tombol"}"#,
+        ]);
+        assert_eq!(st.task().as_deref(), Some("Tambah tombol"));
+    }
+
+    #[test]
+    fn first_string_prompt_becomes_the_task_without_an_ai_title() {
+        let st = advance_lines(&[r#"{"type":"user","message":{"content":"  tambah  tombol \n di header "}}"#]);
+        assert_eq!(st.task().as_deref(), Some("tambah tombol di header"));
+    }
+
+    #[test]
+    fn first_text_block_of_an_array_prompt_becomes_the_task() {
+        let st = advance_lines(&[
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"apa ini?\njelaskan"}]}}"#,
+        ]);
+        assert_eq!(st.task().as_deref(), Some("apa ini? jelaskan"));
+    }
+
+    #[test]
+    fn only_the_first_prompt_is_kept() {
+        let st = advance_lines(&[
+            r#"{"type":"user","message":{"content":"pertama"}}"#,
+            r#"{"type":"user","message":{"content":"kedua"}}"#,
+        ]);
+        assert_eq!(st.task().as_deref(), Some("pertama"));
+    }
+
+    #[test]
+    fn a_tool_result_is_not_a_prompt() {
+        let st = advance_lines(&[
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\"}]}}",
+        ]);
+        assert_eq!(st.task(), None);
+    }
+
+    #[test]
+    fn command_and_system_prompts_are_skipped() {
+        for line in [
+            r#"{"type":"user","message":{"content":"<command-name>/clear</command-name>"}}"#,
+            r#"{"type":"user","message":{"content":"<local-command-stdout>x</local-command-stdout>"}}"#,
+            r#"{"type":"user","message":{"content":"<system-reminder>hi</system-reminder>"}}"#,
+            r#"{"type":"user","message":{"content":"Caveat: the messages below"}}"#,
+        ] {
+            assert_eq!(advance_lines(&[line]).task(), None, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_meta_record_is_not_a_prompt() {
+        let st = advance_lines(&[r#"{"type":"user","isMeta":true,"message":{"content":"caveat-ish"}}"#]);
+        assert_eq!(st.task(), None);
+    }
+
+    #[test]
+    fn a_skipped_line_lets_a_later_real_prompt_through() {
+        let st = advance_lines(&[
+            r#"{"type":"user","message":{"content":"<system-reminder>ctx</system-reminder>"}}"#,
+            r#"{"type":"user","message":{"content":"yang asli"}}"#,
+        ]);
+        assert_eq!(st.task().as_deref(), Some("yang asli"));
+    }
+
+    #[test]
+    fn a_long_task_is_cut_and_marked() {
+        let long = "a".repeat(200);
+        let st = advance_lines(&[&format!(r#"{{"type":"user","message":{{"content":"{long}"}}}}"#)]);
+        let task = st.task().unwrap();
+        assert_eq!(task.chars().count(), 121);
+        assert!(task.ends_with('…'));
     }
 }

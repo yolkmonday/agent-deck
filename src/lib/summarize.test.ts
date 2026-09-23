@@ -10,7 +10,7 @@ const s = (
   billingMode: Session["billingMode"] = "payg",
 ): Session => ({
   id: status + out, agent: "claude", pid: 1, project: "p", cwd: "/p",
-  group: "p", groupRoot: "/p", isWorktree: false, worktreeName: null, model: null, branch: null,
+  group: "p", groupRoot: "/p", isWorktree: false, worktreeName: null, task: null, model: null, branch: null,
   status, activity: null, tokens: { input: 0, output: out, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
   ownTokens: { input: 0, output: out, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, subagents: [],
   costUsd, billingMode, priced, startedAtMs: null, updatedAtMs: 0,

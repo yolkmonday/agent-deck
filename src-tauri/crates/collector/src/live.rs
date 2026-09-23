@@ -130,6 +130,7 @@ fn opencode_session(o: OpencodeLive, home: &str, prices: &PriceTable, billing: &
         group_root,
         is_worktree,
         worktree_name,
+        task: o.task,
         model: o.model,
         branch: None,
         status: o.status,
@@ -198,6 +199,7 @@ impl LiveCollector {
         }
         let model = state.model.clone();
         let branch = state.branch.clone();
+        let task = state.task();
         let last_record_ms = state.last_record_ms;
         let pending_tool_id = state.pending_tool_id.clone();
         let tool_started_ms = state.tool_started_ms;
@@ -243,6 +245,7 @@ impl LiveCollector {
             group_root,
             is_worktree,
             worktree_name,
+            task,
             model,
             branch,
             status: c.status,
@@ -1054,6 +1057,60 @@ mod tests {
         let snap = c.snapshot(1_000_000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
         assert_eq!(snap.sessions.len(), 1);
         assert!(snap.orphans.is_empty());
+    }
+
+    #[test]
+    fn claude_task_comes_from_the_transcript_title_then_the_prompt() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/a", "busy", 1);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/a",
+            "s1",
+            "{\"type\":\"user\",\"message\":{\"content\":\"tambah tombol simpan\"}}\n\
+             {\"type\":\"ai-title\",\"aiTitle\":\"Tombol simpan\"}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let s = &c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults()).sessions[0];
+        assert_eq!(s.task.as_deref(), Some("Tombol simpan"));
+    }
+
+    #[test]
+    fn claude_task_falls_back_to_the_first_prompt() {
+        let (_tmp, paths) = setup();
+        claude_session(&paths, 1, "s1", "/Users/yolk/Dev/a", "busy", 1);
+        claude_transcript(
+            &paths,
+            "/Users/yolk/Dev/a",
+            "s1",
+            "{\"type\":\"user\",\"message\":{\"content\":\"perbaiki login\"}}",
+        );
+        let mut c = collector(paths, &[1]);
+
+        let s = &c.snapshot(20, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults()).sessions[0];
+        assert_eq!(s.task.as_deref(), Some("perbaiki login"));
+    }
+
+    #[test]
+    fn opencode_task_comes_from_the_session_title() {
+        let (_tmp, paths) = setup();
+        fs::create_dir_all(paths.opencode_db.parent().unwrap()).unwrap();
+        let conn = rusqlite::Connection::open(&paths.opencode_db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, directory TEXT, title TEXT, agent TEXT, model TEXT, cost REAL, tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+             INSERT INTO session VALUES ('sa','p',NULL,'/x/y','  rapikan\nworktree  modal ','build','{\"id\":\"m\",\"providerID\":\"kn\"}',0,1,1,0,0,0,1,990000,NULL);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let mut procs = FakeProcessTable::default();
+        procs.procs.push(ProcInfo { pid: 77, command: "/x/opencode run t --dir /x/y".into() });
+        let mut c = LiveCollector::new(paths, std::sync::Arc::new(procs));
+
+        let snap = c.snapshot(1_000_000, &PriceTable::defaults(), &BillingTable::defaults(), &Thresholds::defaults());
+        assert_eq!(snap.sessions[0].task.as_deref(), Some("rapikan worktree modal"));
     }
 
     /// Lays out `<parent>/<main>` with a `.git` directory and `<parent>/<name>` as
